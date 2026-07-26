@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   calcOffline, calcOnline, detectRisks, tplChecklist, parseJSON,
+  calcByMode, tplCampaign, capabilityMinPlan, CAPABILITY_LIST,
+  yuan, wan, pct, clamp, seeded,
   DEFAULT_OFFLINE, DEFAULT_ONLINE, planAllows,
 } from "../src/index.js";
 
@@ -64,4 +66,26 @@ test("档位比较", () => {
   assert.ok(planAllows("pro", "free"));
   assert.ok(!planAllows("free", "pro"));
   assert.ok(planAllows("max", "pro"));
+});
+
+test("公共格式化、分发与能力契约", () => {
+  assert.equal(yuan(1234.4), "1,234");
+  assert.equal(wan(12345), "1.2");
+  assert.equal(pct(0.123), "12.3");
+  assert.equal(clamp(12, 0, 10), 10);
+  assert.equal(seeded(7)(), seeded(7)(), "同一 seed 应复现相同结果");
+  assert.equal(calcByMode("online", DEFAULT_ONLINE).kind, "online");
+  assert.equal(calcByMode("offline", DEFAULT_OFFLINE).kind, "offline");
+  assert.equal(capabilityMinPlan("budgetAudit"), "pro");
+  assert.equal(capabilityMinPlan("unknown"), "free");
+  assert.equal(CAPABILITY_LIST.length, 7);
+});
+
+test("营销兜底模板覆盖线上与线下", () => {
+  const online = tplCampaign("online", "日常拉新", 10000, 7);
+  const offline = tplCampaign("offline", "开业引爆", 8000, 5);
+  assert.equal(online.plays.length, 3);
+  assert.equal(offline.plays.length, 3);
+  assert.notDeepEqual(online.channels, offline.channels);
+  assert.match(online.title, /7 天/);
 });

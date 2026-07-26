@@ -4,6 +4,9 @@
   "version": "0.5.0",
   "description": "乌托帮 UTOBANG — 开店帮助台(自部署开源版:Python 后端 + React 前端)",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "workspaces": [
     "packages/*",
     "apps/web"
@@ -15,12 +18,13 @@
     "dev:web": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace apps/web",
     "start": "apps/server/.venv/bin/python apps/server/run.py",
-    "test:core": "node --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=65 --test-coverage-functions=75 packages/core/test/*.test.js",
+    "test:core": "c8 --temp-directory=/tmp/utobond-open-c8 --reports-dir=/tmp/utobond-open-c8-report --check-coverage --lines 90 --branches 65 --functions 75 node --test packages/core/test/*.test.js",
     "test:server": "COVERAGE_FILE=/tmp/utobond-open.coverage apps/server/.venv/bin/python -m pytest apps/server/tests -q -p no:cacheprovider --cov=config --cov=llm_client --cov=main --cov=presets --cov=run --cov-report=term-missing --cov-fail-under=75",
     "test": "npm run test:core && npm run test:server",
     "check": "npm test && npm run build"
   },
   "devDependencies": {
+    "c8": "^12.0.0",
     "concurrently": "^8.2.2"
   }
 }

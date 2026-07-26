@@ -32,7 +32,7 @@
 
 ## 快速开始
 
-需要 Node.js ≥ 20(跑前端)和 Python ≥ 3.9(跑后端)。
+需要 Node.js ≥ 20.19(跑前端)和 Python ≥ 3.9(跑后端)。
 
 ```bash
 npm install       # 前端依赖
