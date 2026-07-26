@@ -1,7 +1,10 @@
 # 乌托帮 UTOBANG · 自部署版
 
+[![CI](https://github.com/liukunyao92-zq/utobond-open/actions/workflows/ci.yml/badge.svg)](https://github.com/liukunyao92-zq/utobond-open/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 > 开店前把账算明白的帮助台。这是**开源自部署版**:Python 后端 + React 前端,
-> 接你自己的大模型 API,数据不出你的机器,不限次数。
+> 接你自己的大模型 API,Key 由本机保管,不限次数。
 
 面向小微创业者,两条主线各一套模型:
 
@@ -69,7 +72,8 @@ cp apps/server/.env.example apps/server/.env
 
 - Key 存在 `apps/server/data/llm.json`(权限 0600)或 `.env`,**都在你自己的机器上**
 - 接口回显永远脱敏(`sk-a••••klmn`),前端拿不到完整 Key
-- 不经过任何第三方服务器,没有遥测
+- 请求不经过乌托帮平台且没有遥测；提示词和经营数据会发送给你选择的模型供应商
+- 只有使用 Ollama 等本机模型时,模型请求才完全不离开机器
 
 部署给团队用、不想让别人改 Key?设 `LLM_CONFIG_LOCKED=1`,配置只认环境变量,网页设置页变只读。
 
@@ -92,8 +96,9 @@ utobond-open/
 关掉订阅、付费墙、平台后台和「托」板块。业务页面本身与云端版共用同一份代码。
 
 ```bash
-npm test        # core 单测(node) + 后端单测(pytest)
+npm test        # core + 后端测试；core 行覆盖率门槛 90%，后端总覆盖率门槛 75%
 npm run build   # 产出 apps/web/dist;Python 后端检测到 dist 会直接托管,单端口部署
+npm run check   # 发布前完整检查:测试 + 生产构建
 ```
 
 ## 自部署版不做什么
@@ -110,3 +115,9 @@ npm run build   # 产出 apps/web/dist;Python 后端检测到 dist 会直接托�
 ## 许可证
 
 [Apache License 2.0](LICENSE)
+
+## 参与贡献与安全
+
+- 开发流程和代码约定见 [CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全问题请按 [SECURITY.md](SECURITY.md) 私下报告
+- 参与社区时请遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)

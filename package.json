@@ -9,13 +9,16 @@
     "apps/web"
   ],
   "scripts": {
-    "setup": "python3 -m venv apps/server/.venv && apps/server/.venv/bin/pip install -r apps/server/requirements.txt",
+    "setup": "python3 -m venv apps/server/.venv && apps/server/.venv/bin/pip install -r apps/server/requirements-dev.txt",
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "apps/server/.venv/bin/python -m uvicorn main:app --app-dir apps/server --reload --port 8787",
     "dev:web": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace apps/web",
-    "start": "apps/server/.venv/bin/python -m uvicorn main:app --app-dir apps/server --port 8787",
-    "test": "npm run test --workspace packages/core && apps/server/.venv/bin/python -m pytest apps/server/tests -q"
+    "start": "apps/server/.venv/bin/python apps/server/run.py",
+    "test:core": "node --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=65 --test-coverage-functions=75 packages/core/test/*.test.js",
+    "test:server": "COVERAGE_FILE=/tmp/utobond-open.coverage apps/server/.venv/bin/python -m pytest apps/server/tests -q -p no:cacheprovider --cov=config --cov=llm_client --cov=main --cov=presets --cov=run --cov-report=term-missing --cov-fail-under=75",
+    "test": "npm run test:core && npm run test:server",
+    "check": "npm test && npm run build"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

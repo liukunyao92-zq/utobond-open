@@ -67,6 +67,12 @@ def test_redact_never_leaks_key():
     assert r["hasKey"] is True
 
 
+def test_redact_short_key_is_fully_masked():
+    r = redact({"provider": "custom", "apiKey": "abc123", "baseURL": "https://x", "model": "m"})
+    assert r["keyMasked"] == "••••••••"
+    assert "abc123" not in r["keyMasked"]
+
+
 def test_openai_protocol(calls):
     rec = calls(lambda req: httpx.Response(200, json={
         "choices": [{"message": {"content": "好的"}}],
@@ -182,3 +188,14 @@ def test_config_file_over_env(tmp_path, monkeypatch):
     assert cfg.load_config()["apiKey"] == "env-key"
     with pytest.raises(cfg.ConfigLockedError):
         cfg.save_config({"apiKey": "x"})
+
+
+def test_config_drops_old_key_when_endpoint_changes(tmp_path, monkeypatch):
+    monkeypatch.setenv("UTOBOND_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("LLM_CONFIG_LOCKED", raising=False)
+    import config as cfg
+    cfg.save_config({"provider": "custom", "baseURL": "https://one.example/v1",
+                     "model": "m", "apiKey": "secret-one"})
+    changed = cfg.save_config({"provider": "custom", "baseURL": "https://two.example/v1",
+                               "model": "m", "apiKey": ""})
+    assert changed["apiKey"] == ""

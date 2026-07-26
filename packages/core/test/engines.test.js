@@ -26,6 +26,16 @@ test("线上:退货率吃掉 GMV,单均模型为负时应报高风险", () => {
   assert.ok(r.risks.some((x) => x.title.includes("单均经济模型为负")));
 });
 
+test("线上:净利、现金流与保本单量使用同一退货及物流口径", () => {
+  const p = DEFAULT_ONLINE;
+  const c = calcOnline(p);
+  const validRevenuePerOrder = p.price * (1 - p.returnRate);
+  const contributionPerOrder = validRevenuePerOrder * (p.gross - p.commission) - p.shipping;
+  assert.ok(Math.abs(c.beOrders * contributionPerOrder - c.fixed) < 1e-6);
+  assert.ok(Math.abs(c.beRevenue - c.beOrders * validRevenuePerOrder) < 1e-6);
+  assert.equal(c.flow[4].月净利, Math.round(c.net), "满产月份现金流应与月净利一致");
+});
+
 test("风险分随高危项增加而下降,且始终在 5–98 区间", () => {
   const good = detectRisks("offline", DEFAULT_OFFLINE, calcOffline(DEFAULT_OFFLINE));
   const bad = { ...DEFAULT_OFFLINE, rent: 60000, reserveMonths: 1, daily: 20 };

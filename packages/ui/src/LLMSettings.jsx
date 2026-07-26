@@ -105,8 +105,9 @@ export function LLMSettings({ apiFetch }) {
           <div className="sp-note tip" style={{ marginBottom: 16 }}>
             <Sparkles size={15} />
             <div>
-              这是你自己的 Key,只存在这台机器上(<code>{cfg?.configPath || "环境变量"}</code>),
-              请求由本机后端直连供应商,不经过任何第三方。没配也能用 —— AI 能力会落到内置模板。
+              这是你自己的 Key,只存在这台机器上(<code>{cfg?.configPath || "环境变量"}</code>)。
+              请求由本机后端直连你选择的模型供应商,不经过乌托帮平台；仅 Ollama 模式完全离线。
+              没配也能用 —— AI 能力会落到内置模板。
             </div>
           </div>
 

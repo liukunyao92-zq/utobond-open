@@ -12,6 +12,7 @@ data/llm.json
 
 # 本地工具配置
 .claude/
+.vscode/
 
 # Python
 .venv/

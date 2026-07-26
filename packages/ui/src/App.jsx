@@ -514,11 +514,12 @@ function Field({ label, hint, children }) {
     </div>
   );
 }
-function NumIn({ value, onChange, unit, step = 1, min = 0 }) {
+function NumIn({ value, onChange, unit, step = 1, min = 0, max = Infinity }) {
   return (
     <div className="sp-numwrap">
       <input className="sp-input" type="number" value={value} step={step} min={min}
-        onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))} />
+        max={isFinite(max) ? max : undefined}
+        onChange={(e) => onChange(clamp(e.target.value === "" ? min : Number(e.target.value), min, max))} />
       {unit && <span className="sp-unit">{unit}</span>}
     </div>
   );
@@ -529,7 +530,7 @@ function RateIn({ value, onChange, min = 0, max = 100, step = 0.1, unit = "%" })
       <div className="sp-numwrap">
         <input className="sp-input" type="number" value={(value * 100).toFixed(step < 1 ? 1 : 0)}
           step={step} min={min} max={max}
-          onChange={(e) => onChange(clamp(Number(e.target.value || 0) / 100, 0, 1))} />
+          onChange={(e) => onChange(clamp(Number(e.target.value || min) / 100, min / 100, max / 100))} />
         <span className="sp-unit">{unit}</span>
       </div>
       <input className="sp-range" type="range" min={min} max={max} step={step}

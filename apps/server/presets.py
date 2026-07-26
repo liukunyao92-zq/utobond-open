@@ -132,11 +132,14 @@ def redact(config=None):
     """给前端看的脱敏配置:永远不回传完整 key"""
     config = config or {}
     key = config.get("apiKey") or ""
+    masked = ""
+    if key:
+        masked = f"{key[:4]}••••{key[-4:]}" if len(key) >= 16 else "••••••••"
     return {
         "provider": config.get("provider") or "",
         "baseURL": config.get("baseURL") or "",
         "model": config.get("model") or "",
         "hasKey": bool(key),
-        "keyMasked": f"{key[:4]}••••{key[-4:]}" if key else "",
+        "keyMasked": masked,
         "configured": is_configured(config),
     }

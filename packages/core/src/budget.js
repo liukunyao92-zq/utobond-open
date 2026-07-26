@@ -80,9 +80,12 @@ export function calcOnline(p) {
   const logistics = orders * p.shipping;
   const net = validGmv - cogs - fee - logistics - fixed;
   const roi = p.adSpend > 0 ? validGmv / p.adSpend : Infinity;
-  const marginRate = p.gross - p.commission - p.shipping / p.price;
+  // 有效 GMV 已扣退货，但物流费发生在全部下单量上；统一换算到有效 GMV 口径。
+  const validRevenuePerOrder = p.price * (1 - p.returnRate);
+  const contributionPerOrder = validRevenuePerOrder * (p.gross - p.commission) - p.shipping;
+  const marginRate = validRevenuePerOrder > 0 ? contributionPerOrder / validRevenuePerOrder : -Infinity;
   const beGmv = marginRate > 0 ? fixed / marginRate : Infinity;
-  const beOrders = isFinite(beGmv) ? beGmv / p.price : Infinity;
+  const beOrders = contributionPerOrder > 0 ? fixed / contributionPerOrder : Infinity;
   const payback = net > 0 ? oneTime / net : null;
   let cum = -startup;
   const flow = RAMP.map((r, i) => {

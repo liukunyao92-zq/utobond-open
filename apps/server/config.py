@@ -71,16 +71,24 @@ def save_config(patch=None):
     patch = patch or {}
     current = load_config()
 
-    def pick(key):
-        v = patch.get(key)
-        return v if v is not None and v != "" else current.get(key, "")
+    provider = patch.get("provider") or current.get("provider") or ""
+    base_url = patch.get("baseURL") or current.get("baseURL") or ""
+    identity_changed = (
+        provider != current.get("provider", "")
+        or base_url.rstrip("/") != (current.get("baseURL") or "").rstrip("/")
+    )
+    submitted_key = patch.get("apiKey", "")
+    if identity_changed and not submitted_key:
+        api_key = ""
+    else:
+        # 空字符串表示保留当前 key，null 表示显式清空。
+        api_key = "" if submitted_key is None else (submitted_key or current.get("apiKey") or "")
 
     nxt = {
-        "provider": patch.get("provider") or current.get("provider") or "",
-        "baseURL": patch.get("baseURL") or current.get("baseURL") or "",
+        "provider": provider,
+        "baseURL": base_url,
         "model": patch.get("model") or current.get("model") or "",
-        # 前端提交空字符串表示「不改 key」,提交 null 表示「清空」
-        "apiKey": "" if patch.get("apiKey", "") is None else (patch.get("apiKey") or current.get("apiKey") or ""),
+        "apiKey": api_key,
     }
     preset = PRESETS.get(nxt["provider"], {})
     if not nxt["baseURL"]:

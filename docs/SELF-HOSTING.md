@@ -4,7 +4,7 @@
 
 - Python ≥ 3.9(跑后端)
 - Node.js ≥ 20(构建/开发前端;线上部署只需构建一次)
-- 不需要数据库,不需要 Redis,不需要任何外部服务
+- 不需要数据库或 Redis；模型服务是可选依赖,未配置时自动使用内置模板
 
 ## 一、本机跑
 
@@ -39,7 +39,9 @@ cp apps/server/.env.example apps/server/.env
 | `LLM_BASE_URL` | 接口地址,留空用官方地址;接中转站时必填 |
 | `LLM_CONFIG_LOCKED` | 设 `1` 则锁死:网页设置页只读,只认环境变量 |
 | `UTOBOND_CONFIG_DIR` | 配置文件目录,默认 `apps/server/data` |
-| `PORT` | 后端端口,默认 8787(传给 uvicorn 的 `--port`) |
+| `HOST` | 监听地址,默认 `127.0.0.1`;容器部署通常设 `0.0.0.0` |
+| `PORT` | 后端端口,默认 8787 |
+| `UTOBOND_ALLOWED_ORIGINS` | 前后端分域时允许调用 API 的前端 Origin,多个用逗号分隔 |
 
 > 早期版本的 `ANTHROPIC_API_KEY` 仍然认,会自动当作 `LLM_PROVIDER=anthropic`。
 
@@ -73,7 +75,7 @@ LLM_MODEL=qwen2.5:14b
 
 ```bash
 npm run build     # 产出 apps/web/dist
-npm start         # 起后端:uvicorn main:app --port 8787
+npm start         # 起后端,读取 HOST / PORT 环境变量
 ```
 
 **Python 后端检测到 `apps/web/dist` 存在时会直接托管它** —— 单进程、单端口就能用,
@@ -84,12 +86,17 @@ npm start         # 起后端:uvicorn main:app --port 8787
 
 ```
 VITE_API_BASE=https://api.你的域名.com/api
+UTOBOND_ALLOWED_ORIGINS=https://你的前端域名.com
 ```
 
 Nginx 同域反代:
 
 ```nginx
-location /api/ { proxy_pass http://127.0.0.1:8787; }
+location /api/ {
+  proxy_pass http://127.0.0.1:8787;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
 location /     { root /var/www/utobond; try_files $uri /index.html; }
 ```
 
@@ -116,6 +123,8 @@ WantedBy=multi-user.target
 
 - **别把后端直接裸露到公网**。它没有鉴权 —— 谁能访问 `/api/settings/llm` 谁就能改你的模型配置(读不到完整 Key,但能换成自己的地址)。放在内网,或前面挂一层 Basic Auth / 反代鉴权。
 - 需要多人使用又要控制配置权限:设 `LLM_CONFIG_LOCKED=1`。
+- 后端默认只接受同源请求和本机开发前端；分域部署必须显式配置 `UTOBOND_ALLOWED_ORIGINS`。
+- 提示词与经营数据会发送给你配置的模型供应商；仅本机 Ollama 模式完全离线。
 - `apps/server/data/` 已在 `.gitignore` 里,别手动加进版本库。
 
 ## 五、排查
