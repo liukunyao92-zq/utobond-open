@@ -2788,13 +2788,14 @@ export default function UtobangApp({
     { k: "risk", label: "风险识别", icon: ShieldAlert, ai: true },
     { k: "advisor", label: "AI 参谋", icon: Bot, ai: true },
   ];
-  const NAV_OPS = [
+  /** 「托」板块整组随 edition.ops 走 —— 自部署版没有这一板块 */
+  const NAV_OPS = edition.ops ? [
     { k: "ops", label: "日常运营", icon: Activity, ai: true },
     { k: "report", label: "数据报表", icon: TrendingUp },
     { k: "marketing", label: "营销活动", icon: Megaphone, ai: true },
     ...(edition.hosting ? [{ k: "hosting", label: "托管服务", icon: Headset }] : []),
-  ];
-  /** 通用组:两版各挂各的 —— 云端是订阅账单,自部署是模型设置 */
+  ] : [];
+  /** 「自定义」板块:云端是订阅账单,自部署是模型设置 */
   const NAV_COMMON = [
     ...(edition.billing ? [{ k: "billing", label: "订阅与账单", icon: Receipt }] : []),
     ...(edition.settings ? [{ k: "settings", label: "模型设置", icon: Wrench }] : []),
@@ -2809,6 +2810,12 @@ export default function UtobangApp({
   const opened = !!store?.opened;
   /** 这些页面不依赖店铺,未建店也能直接进 */
   const STANDALONE = new Set(["billing", "settings", "hosting"]);
+  /**
+   * 线上/线下主线切换只属于「帮」板块 —— 只有这些页面(和未建店的向导)
+   * 的内容跟主线绑定。托、自定义板块不显示切换。
+   */
+  const PREP_TABS = new Set(["overview", "checklist", "budget", "site", "risk", "advisor"]);
+  const showModeSeg = PREP_TABS.has(tab) || (!store && !STANDALONE.has(tab));
 
   let page;
   if (isAdmin) {
@@ -2859,7 +2866,8 @@ export default function UtobangApp({
   return (
     <AppCtx.Provider value={ctx}>
       <style>{CSS}</style>
-      <div className="sp" data-line={isAdmin ? "offline" : mode}>
+      {/* 主线配色只在「帮」板块生效,托/自定义板块用默认青色,不泄漏线上线下的区别 */}
+      <div className="sp" data-line={!isAdmin && showModeSeg ? mode : "offline"}>
         <nav className="sp-nav">
           <div className="sp-brand">
             <div className="sp-brand-row">
@@ -2894,7 +2902,7 @@ export default function UtobangApp({
               </>
             ) : (
               <>
-                <div className="sp-navgroup"><i />开店帮 · 把账算明白</div>
+                <div className="sp-navgroup"><i />帮 · 开店帮助</div>
                 {!store && (
                   <button className={`sp-navitem ${!STANDALONE.has(tab) ? "on" : ""}`}
                     onClick={() => setTab("overview")}>
@@ -2914,7 +2922,7 @@ export default function UtobangApp({
                     </button>
                   );
                 })}
-                <div className="sp-navgroup"><i />运营托 · 帮你跑起来</div>
+                {NAV_OPS.length > 0 && <div className="sp-navgroup"><i />托 · 运营托管</div>}
                 {NAV_OPS.map((n) => {
                   const locked = !opened && n.k !== "hosting";
                   return (
@@ -2927,7 +2935,7 @@ export default function UtobangApp({
                     </button>
                   );
                 })}
-                {NAV_COMMON.length > 0 && <div className="sp-navgroup"><i />通用</div>}
+                {NAV_COMMON.length > 0 && <div className="sp-navgroup"><i />自定义</div>}
                 {NAV_COMMON.map((n) => (
                   <button key={n.k} className={`sp-navitem ${tab === n.k ? "on" : ""}`} onClick={() => setTab(n.k)}>
                     <n.icon size={16} strokeWidth={1.9} />{n.label}
@@ -2976,14 +2984,16 @@ export default function UtobangApp({
                   </span>
                   {store && <Tag tone={opened ? "profit" : "amber"}>{opened ? "营业中" : "筹备中"}</Tag>}
                 </div>
-                <div className="sp-seg">
-                  <button className={mode === "offline" ? "on" : ""} onClick={() => setMode("offline")}>
-                    <Store size={13} />线下实体店
-                  </button>
-                  <button className={mode === "online" ? "on" : ""} onClick={() => setMode("online")}>
-                    <Globe size={13} />线上店铺
-                  </button>
-                </div>
+                {showModeSeg && (
+                  <div className="sp-seg">
+                    <button className={mode === "offline" ? "on" : ""} onClick={() => setMode("offline")}>
+                      <Store size={13} />线下实体店
+                    </button>
+                    <button className={mode === "online" ? "on" : ""} onClick={() => setMode("online")}>
+                      <Globe size={13} />线上店铺
+                    </button>
+                  </div>
+                )}
                 <div className="sp-topright">
                   {edition.showPlanTag && (
                     <Tag tone={plan === "free" ? "" : "brand"}>{plan !== "free" && <Crown size={11} />}{PLANS[plan].name}</Tag>

@@ -12,3 +12,9 @@ data/llm.json
 
 # 本地工具配置
 .claude/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

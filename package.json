@@ -1,17 +1,18 @@
 {
   "name": "utobond",
   "private": true,
-  "version": "0.4.0",
-  "description": "乌托帮 UTOBANG — 先帮后托的开店服务台(自部署开源版)",
+  "version": "0.5.0",
+  "description": "乌托帮 UTOBANG — 开店帮助台(自部署开源版:Python 后端 + React 前端)",
   "license": "Apache-2.0",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": ["packages/*", "apps/web"],
   "scripts": {
+    "setup": "python3 -m venv apps/server/.venv && apps/server/.venv/bin/pip install -r apps/server/requirements.txt",
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "npm run dev --workspace apps/server",
+    "dev:server": "apps/server/.venv/bin/python -m uvicorn main:app --app-dir apps/server --reload --port 8787",
     "dev:web": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace apps/web",
-    "start": "npm run start --workspace apps/server",
-    "test": "npm run test --workspace packages/core && npm run test --workspace packages/ai"
+    "start": "apps/server/.venv/bin/python -m uvicorn main:app --app-dir apps/server --port 8787",
+    "test": "npm run test --workspace packages/core && apps/server/.venv/bin/python -m pytest apps/server/tests -q"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
