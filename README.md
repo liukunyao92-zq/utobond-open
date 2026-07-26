@@ -76,7 +76,7 @@ cp apps/server/.env.example apps/server/.env
 ## 仓库结构
 
 ```
-utobond/
+utobond-open/
 ├── packages/
 │   ├── core/     @utobond/core  纯逻辑:预算引擎、风险规则、内置模板、AI 能力契约(带单测)
 │   └── ui/       @utobond/ui    业务界面(React),按 edition 装配

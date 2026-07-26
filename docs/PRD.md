@@ -146,7 +146,7 @@
 ### 6.2 代码分布
 
 ```
-开源仓 utobond/
+开源仓 utobond-open/
   packages/core   预算引擎、风险规则、内置模板、AI 能力契约(纯 JS,带单测)
   packages/ui     业务界面(React),按 edition 装配 —— 两版共用,不分叉
   apps/server     Python/FastAPI:多 Provider AI 网关 + 模型设置(带 pytest 单测)

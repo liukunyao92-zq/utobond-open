@@ -1,10 +1,13 @@
 {
-  "name": "utobond",
+  "name": "utobond-open",
   "private": true,
   "version": "0.5.0",
   "description": "乌托帮 UTOBANG — 开店帮助台(自部署开源版:Python 后端 + React 前端)",
   "license": "Apache-2.0",
-  "workspaces": ["packages/*", "apps/web"],
+  "workspaces": [
+    "packages/*",
+    "apps/web"
+  ],
   "scripts": {
     "setup": "python3 -m venv apps/server/.venv && apps/server/.venv/bin/pip install -r apps/server/requirements.txt",
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
