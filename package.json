@@ -1,15 +1,17 @@
 {
   "name": "utobond",
   "private": true,
-  "version": "0.3.0",
-  "description": "乌托帮 UTOBANG — 先帮后托的开店服务台(monorepo)",
-  "workspaces": ["apps/*"],
+  "version": "0.4.0",
+  "description": "乌托帮 UTOBANG — 先帮后托的开店服务台(自部署开源版)",
+  "license": "Apache-2.0",
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "npm run dev --workspace apps/server",
     "dev:web": "npm run dev --workspace apps/web",
     "build": "npm run build --workspace apps/web",
-    "start": "npm run start --workspace apps/server"
+    "start": "npm run start --workspace apps/server",
+    "test": "npm run test --workspace packages/core && npm run test --workspace packages/ai"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

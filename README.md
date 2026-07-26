@@ -1,59 +1,106 @@
-# 乌托帮 UTOBANG
+# 乌托帮 UTOBANG · 自部署版
 
 > 先帮后托的开店服务台。「帮」是 AI 把账算明白,「托」是真人把活儿接过去。
+>
+> 这是**开源自部署版**:接你自己的大模型 API,数据不出你的机器,不限次数。
 
-Monorepo 结构:
+面向小微创业者,两条主线各一套模型:
 
-```
-utobond/
-├── apps/
-│   ├── web/        # 前端:React 18 + Vite(业务前台 + 管理后台)
-│   └── server/     # 后端:Node + Express + Anthropic SDK(AI 网关)
-├── docs/
-│   └── PRD.md      # 产品稿(信息架构、页面规格、AI 能力矩阵、订阅体系)
-└── package.json    # npm workspaces
-```
+- **线下实体店** —— 选址、装修、证照、排班。最怕「签了约才发现算不过账」。
+- **线上店铺** —— 流量、转化、投流、退货率。最怕「钱投出去了单没回来」。
+
+## 它能干什么
+
+| 页面 | 干什么 | 用不用 AI |
+|---|---|---|
+| 开店设置 | 三步向导:选主线 → 说清楚你卖什么 → 生成开店清单与预算 | ✅ |
+| 开店清单 | 五阶段任务逐项打勾,带金额的合计就是开店账 | ✅ 可重新定制 |
+| 预算测算 | 双引擎测算 + 保本刻度尺 + 12 个月现金流 + 回本周期 | ✅ 预算体检 |
+| 选址分析 / 平台选择 | 六维评分 + 谈判要点;线上给平台匹配度与冷启动路径 | ✅ |
+| 风险识别 | 规则引擎实时联动预算参数,健康分 + 五维雷达 | ✅ 深度扫描 |
+| AI 参谋 | 双人设对话,系统提示词注入你的真实经营数字 | ✅ |
+| 日常运营 / 数据报表 / 营销活动 | 开业后解锁:运营诊断、经营看板、活动方案 | ✅ |
+| 模型设置 | 换供应商、换模型、测连通性 | — |
+
+**没配 Key 也能完整跑通**:AI 调用失败会自动落到内置模板,金额仍按你填的参数实时计算,流程不中断。
 
 ## 快速开始
 
 ```bash
-# 1. 安装(根目录一次装完两个 workspace)
 npm install
-
-# 2. 配置 AI Key
-cp apps/server/.env.example apps/server/.env
-#    编辑 .env,填入 ANTHROPIC_API_KEY
-
-# 3. 一键起前后端
 npm run dev
-#    server → http://localhost:8787
-#    web    → http://localhost:5173(/api 自动代理到 server)
 ```
 
-没配 Key 也能跑:AI 接口返回 503,前端自动落到内置模板(开店清单、营销方案等仍可走通全流程)。
+打开 http://localhost:5173,左侧「模型设置」填入你的 API Key 即可。后端在 8787。
 
-## AI 架构(为什么这样选型)
+也可以先写进环境变量:
 
-**前端永远不碰模型。** 所有 AI 请求走 `POST /api/ai/complete`,好处:
+```bash
+cp apps/server/.env.example apps/server/.env
+```
 
-1. **Key 安全** — API Key 只存在于服务端 `.env`
-2. **换模型零成本** — 改 `AI_MODEL` 环境变量即可;要接 OpenAI/本地模型,只改 `apps/server/src/ai/provider.js` 一个文件
-3. **能力可叠加** — 网关层后续可加:用量计费(对接订阅档位)、缓存、限流、提示词版本管理、多模型路由与降级
-4. **流式就绪** — `/api/ai/stream` 已提供 SSE,参谋对话可渐进升级为打字机效果
-5. **结构化可靠** — `provider.js` 的 `completeJSON()` 用 zod 校验 + 失败自动重试,解决"模型偶尔不回 JSON"的经典问题
+## 支持哪些模型
 
-## 接口
+内置预设,选了就自动填好接口地址:
 
-| 方法 | 路径 | 说明 |
+| 供应商 | 协议 | 备注 |
 |---|---|---|
-| GET | `/api/health` | 健康检查 + AI 配置状态 |
-| POST | `/api/ai/complete` | 文本补全:`{messages, system?, maxTokens?}` → `{text, model, usage}` |
-| POST | `/api/ai/stream` | SSE 流式补全,同参 |
+| DeepSeek | OpenAI | 性价比高,中文场景稳,推荐自部署首选 |
+| OpenAI | OpenAI | 国内直连通常需要代理 |
+| Claude(Anthropic) | Anthropic | 结构化输出稳定 |
+| 月之暗面 Kimi / 智谱 GLM / 阿里通义千问 | OpenAI | 智谱 glm-4-flash 有免费额度,适合先跑通 |
+| Ollama | OpenAI | 本机模型,完全离线,免 Key |
+| **OpenAI 兼容(自定义 / 中转站)** | OpenAI | 填中转站给的 baseURL 和模型名即可,不用改代码 |
 
-## 路线图(见 docs/PRD.md 第 8 节)
+接一个没列出来的服务:选「OpenAI 兼容」,填地址和模型名就行 —— 只要对方是 `/chat/completions` 协议。
 
-- [ ] 用户体系与 JWT 鉴权
-- [ ] 订阅/支付接入(微信/支付宝),AI 用量与档位联动计费
-- [ ] 数据落库(PostgreSQL + Prisma):店铺、清单进度、对话历史
-- [ ] 参谋对话切流式;提示词抽离为版本化模板
-- [ ] 管理后台接真实数据
+## 你的 Key 去哪了
+
+```
+浏览器  ──/api/ai/complete──▶  本机后端  ──▶  你选的供应商
+(不知道 Key 长什么样)         (Key 只在这里)
+```
+
+- Key 存在 `apps/server/data/llm.json`(权限 0600)或 `.env`,**都在你自己的机器上**
+- 接口回显永远脱敏(`sk-a••••klmn`),前端拿不到完整 Key
+- 不经过任何第三方服务器,没有遥测
+
+部署给团队用、不想让别人改 Key?设 `LLM_CONFIG_LOCKED=1`,配置只认环境变量,网页设置页变只读。
+
+## 仓库结构
+
+```
+utobond/
+├── packages/
+│   ├── core/     @utobond/core  纯逻辑:预算引擎、风险规则、内置模板、AI 能力契约(带单测)
+│   ├── ai/       @utobond/ai    多 Provider 适配 + Express 路由,零运行时依赖(带单测)
+│   └── ui/       @utobond/ui    全部业务界面,按 edition 装配
+├── apps/
+│   ├── web/      自部署版前端外壳
+│   └── server/   自部署版后端(AI 网关 + 模型设置)
+└── docs/
+    ├── PRD.md          产品稿
+    └── SELF-HOSTING.md 自部署与运维
+```
+
+`packages/ui` 用一个 `edition` 配置对象控制装配 —— 自部署版关掉订阅、付费墙、平台后台,打开模型设置。业务页面本身两版共用同一份代码。
+
+```bash
+npm test        # core 与 ai 两个包的单测
+npm run build   # 产出 apps/web/dist,任意静态托管都能放
+```
+
+## 自部署版不做什么
+
+刻意不做,不是没做完:
+
+- **没有账号体系** —— 打开就能用
+- **不落库** —— 业务数据只在浏览器内存里,关掉标签页就没了。换来的是零数据库、零运维、隐私最好
+- **没有订阅和额度** —— 你用自己的 Key,想调多少次是你和供应商之间的事
+- **没有真人托管服务** —— 那是需要人力交付的商业服务
+
+需要多设备同步、团队协作、开箱即用不配 Key 的,那是云端 SaaS 版(闭源,另一个仓库)。
+
+## 许可证
+
+[Apache License 2.0](LICENSE)

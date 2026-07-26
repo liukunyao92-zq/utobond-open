@@ -1,0 +1,22 @@
+{
+  "name": "@utobond/ai",
+  "version": "0.4.0",
+  "description": "乌托帮 AI 网关:多 Provider 适配(OpenAI / DeepSeek / Anthropic / 任意 OpenAI 兼容中转站)+ Express 路由,零运行时依赖",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./presets": "./src/presets.js",
+    "./client": "./src/client.js",
+    "./config": "./src/config.js",
+    "./router": "./src/router.js"
+  },
+  "files": ["src"],
+  "peerDependencies": {
+    "express": "^4.19.2"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

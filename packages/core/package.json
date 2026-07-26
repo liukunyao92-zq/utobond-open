@@ -1,0 +1,21 @@
+{
+  "name": "@utobond/core",
+  "version": "0.4.0",
+  "description": "乌托帮核心域逻辑:预算计算引擎、风险规则引擎、内置模板、AI 输出契约(纯 JS,无框架依赖)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./format": "./src/format.js",
+    "./budget": "./src/budget.js",
+    "./risk": "./src/risk.js",
+    "./templates": "./src/templates.js",
+    "./plans": "./src/plans.js",
+    "./contracts": "./src/contracts.js"
+  },
+  "files": ["src"],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

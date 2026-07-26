@@ -13,6 +13,15 @@ import {
   Tooltip, ResponsiveContainer, ReferenceLine, RadarChart, PolarGrid,
   PolarAngleAxis, Radar, Cell
 } from "recharts";
+import {
+  yuan, wan, pct, clamp, seeded, parseJSON,
+  calcOffline, calcOnline, detectRisks,
+  DEFAULT_OFFLINE, DEFAULT_ONLINE,
+  tplChecklist, tplCampaign, WIZ_DEFAULTS, MKT_GOALS,
+  PLANS, PLAN_FEATURES, CAPABILITIES,
+} from "@utobond/core";
+import { LOCAL_EDITION } from "./editions.js";
+import { LLMSettings } from "./LLMSettings.jsx";
 
 /* ============================================================
    乌托帮 UTOBANG — 先帮后托的开店服务台
@@ -406,186 +415,56 @@ const CSS = `
 }
 `;
 
-/* ---------------- 工具 ---------------- */
-const yuan = (n) => (isFinite(n) ? Math.round(n).toLocaleString("zh-CN") : "—");
-const wan = (n) => (isFinite(n) ? (n / 10000).toFixed(1) : "—");
-const pct = (n) => (isFinite(n) ? (n * 100).toFixed(1) : "—");
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const seeded = (s) => () => ((s = (s * 9301 + 49297) % 233280), s / 233280);
-
-/* ---------------- 计算引擎 ---------------- */
-const RAMP = [0.5, 0.7, 0.85, 0.95, 1, 1, 1.02, 1.05, 1.05, 1.08, 1.1, 1.12];
-
-function calcOffline(p) {
-  const decor = p.area * p.decorPerSqm;
-  const depositAmt = p.rent * p.depositMonths;
-  const oneTime = p.transfer + depositAmt + decor + p.equipment + p.stock + p.license + p.launch;
-  const fixed = p.rent + p.staff * p.salary + p.utility + p.otherFixed;
-  const reserve = fixed * p.reserveMonths;
-  const startup = oneTime + reserve;
-  const revenue = p.daily * p.price * p.days;
-  const net = revenue * p.gross - fixed;
-  const beRevenue = p.gross > 0 ? fixed / p.gross : Infinity;
-  const beDaily = isFinite(beRevenue) ? beRevenue / p.days / p.price : Infinity;
-  const payback = net > 0 ? oneTime / net : null;
-  let cum = -startup;
-  const flow = RAMP.map((r, i) => {
-    const rev = revenue * r;
-    const m = rev * p.gross - fixed;
-    cum += m;
-    return { m: `M${i + 1}`, 营业额: Math.round(rev), 月净利: Math.round(m), 累计现金: Math.round(cum) };
-  });
-  const breakMonth = flow.findIndex((f) => f.累计现金 >= 0);
-  return {
-    kind: "offline", decor, depositAmt, oneTime, fixed, reserve, startup,
-    revenue, net, beRevenue, beDaily, payback, flow,
-    breakMonth: breakMonth >= 0 ? breakMonth + 1 : null,
-    sqmDay: revenue / p.days / p.area,
-    items: [
-      ["转让费", p.transfer, "接手上一家的剩余价值"],
-      [`押金(押${p.depositMonths}付1)`, depositAmt, "退租时可收回"],
-      [`装修 ${p.area}㎡ × ${yuan(p.decorPerSqm)}/㎡`, decor, "含水电改造与消防"],
-      ["设备采购", p.equipment, "后厨、前台、家具"],
-      ["首批库存", p.stock, "原料与包材"],
-      ["证照办理", p.license, "营业执照、食品经营许可"],
-      ["开业营销", p.launch, "开业活动与首月投放"],
-    ],
-    fixedItems: [
-      ["房租", p.rent],
-      [`人力 ${p.staff}人 × ${yuan(p.salary)}`, p.staff * p.salary],
-      ["水电物业", p.utility],
-      ["其他固定支出", p.otherFixed],
-    ],
-  };
-}
-
-function calcOnline(p) {
-  const oneTime = p.bond + p.stock + p.visual + p.gear + p.tools;
-  const fixed = p.staff * p.salary + p.otherFixed + p.adSpend;
-  const reserve = fixed * p.reserveMonths;
-  const startup = oneTime + reserve;
-  const orders = p.visitors * p.cvr * 30;
-  const gmv = orders * p.price;
-  const validGmv = gmv * (1 - p.returnRate);
-  const cogs = validGmv * (1 - p.gross);
-  const fee = validGmv * p.commission;
-  const logistics = orders * p.shipping;
-  const net = validGmv - cogs - fee - logistics - fixed;
-  const roi = p.adSpend > 0 ? validGmv / p.adSpend : Infinity;
-  const marginRate = p.gross - p.commission - p.shipping / p.price;
-  const beGmv = marginRate > 0 ? fixed / marginRate : Infinity;
-  const beOrders = isFinite(beGmv) ? beGmv / p.price : Infinity;
-  const payback = net > 0 ? oneTime / net : null;
-  let cum = -startup;
-  const flow = RAMP.map((r, i) => {
-    const g = validGmv * r;
-    const m = g * marginRate - fixed;
-    cum += m;
-    return { m: `M${i + 1}`, 营业额: Math.round(g), 月净利: Math.round(m), 累计现金: Math.round(cum) };
-  });
-  const breakMonth = flow.findIndex((f) => f.累计现金 >= 0);
-  return {
-    kind: "online", oneTime, fixed, reserve, startup, orders, gmv, validGmv,
-    revenue: validGmv, net, roi, beRevenue: beGmv, beOrders, payback, flow,
-    marginRate, breakMonth: breakMonth >= 0 ? breakMonth + 1 : null,
-    items: [
-      ["平台保证金", p.bond, "闭店后可退"],
-      ["首批备货", p.stock, "按 1.5 个月销量备"],
-      ["店铺视觉", p.visual, "主图、详情页、模特"],
-      ["拍摄设备", p.gear, "灯光、相机、场地"],
-      ["软件年费", p.tools, "ERP、数据工具"],
-    ],
-    fixedItems: [
-      ["推广投流", p.adSpend],
-      [`人力 ${p.staff}人 × ${yuan(p.salary)}`, p.staff * p.salary],
-      ["其他固定支出", p.otherFixed],
-    ],
-  };
-}
-
-/* ---------------- 风险规则引擎 ---------------- */
-function detectRisks(mode, p, calc) {
-  const R = [];
-  const add = (cat, level, title, detail, fix) => R.push({ cat, level, title, detail, fix });
-  if (mode === "offline") {
-    const rentRatio = p.rent / calc.revenue;
-    if (rentRatio > 0.2) add("现金流", "高", `房租占营业额 ${pct(rentRatio)}%`, "超过 20% 的警戒线,旺季也难覆盖", "谈免租期或降租;或先验证客单价能否提 10%");
-    else if (rentRatio > 0.13) add("现金流", "中", `房租占营业额 ${pct(rentRatio)}%`, "处于 13–20% 的敏感区", "合同里锁定两年租金涨幅上限");
-    if (p.reserveMonths < 3) add("现金流", "中", `备用金仅 ${p.reserveMonths} 个月`, "爬坡期通常要 3–4 个月才稳", "备用金补足到 3 个月固定支出");
-    if (!calc.payback || calc.payback > 18) add("现金流", "高", "回本周期超过 18 个月", "期间任何波动都会被放大", "装修和设备砍 20%,先轻资产验证");
-    else if (calc.payback > 12) add("现金流", "低", `回本约 ${calc.payback.toFixed(1)} 个月`, "在 12–18 个月区间,可接受但偏慢", "开业前三个月每周对一次现金流");
-    if (p.daily < calc.beDaily) add("市场", "高", "客流假设低于保本线", `保本要 ${Math.round(calc.beDaily)} 人/天,当前假设 ${p.daily} 人`, "签约前先蹲点两周实数人流");
-    const sunk = (calc.depositAmt + p.transfer) / calc.startup;
-    if (sunk > 0.35) add("市场", "中", `沉没成本占启动资金 ${pct(sunk)}%`, "押金加转让费不产生任何营收", "转让费谈分期,整体压到 30% 以内");
-    const laborRatio = (p.staff * p.salary) / calc.revenue;
-    if (laborRatio > 0.25) add("运营", "中", `人力占营业额 ${pct(laborRatio)}%`, "超过 25% 说明排班有冗余", "高峰时段兼职化:1 全职 + 2 兼职起步");
-    if (p.license < 3000) add("合规", "低", "证照预算偏紧", "餐饮类含食品经营许可通常 3000 元起", "签约前确认物业能过环评和消防");
-    add("供给", "低", "单一供应商依赖", "主要原料断供,门店直接停摆", "关键原料至少备两家供应商比价");
-  } else {
-    const adRatio = p.adSpend / calc.validGmv;
-    if (adRatio > 0.3) add("现金流", "高", `投流占 GMV ${pct(adRatio)}%`, "停投即停单,现金消耗极快", "ROI 低于 1.8 的计划全停,先做自然流");
-    else if (adRatio > 0.2) add("现金流", "中", `投流占 GMV ${pct(adRatio)}%`, "处于 20–30% 的敏感区", "逐周降 3 个点,用内容流量补位");
-    if (calc.roi < 1.5) add("市场", "高", `投流 ROI 仅 ${isFinite(calc.roi) ? calc.roi.toFixed(2) : "—"}`, "低于 1.5 基本是亏钱买量", "停投,复盘素材和人群包再开");
-    else if (calc.roi < 2.5) add("市场", "中", `投流 ROI ${calc.roi.toFixed(2)}`, "未到 2.5 的安全线", "素材周更 5 条,跑赢衰减速度");
-    if (p.returnRate > 0.15) add("运营", "高", `退货率 ${pct(p.returnRate)}%`, "高于 15%,吞掉利润还拉低店铺权重", "按 SKU 拉退货理由,集中项先改");
-    else if (p.returnRate > 0.1) add("运营", "中", `退货率 ${pct(p.returnRate)}%`, "高于多数品类均值", "详情页管理预期,减少过度承诺");
-    if (p.cvr < 0.02) add("市场", "中", `转化率 ${pct(p.cvr)}%`, "低于行业 2% 的基准", "主图做 A/B,首屏卖点重排");
-    const cover = p.stock / (calc.validGmv * (1 - p.gross) || 1);
-    if (cover < 1) add("供给", "中", `备货仅覆盖 ${cover.toFixed(1)} 个月`, "一起量就断货,流量白买", "按 1.5 个月销量滚动补货");
-    else if (cover > 2.5) add("供给", "中", `备货压了 ${cover.toFixed(1)} 个月`, "现金被压在库存上", "首批砍半,用预售试深度");
-    if (calc.marginRate <= 0) add("现金流", "高", "单均经济模型为负", "每多卖一单就多亏一单", "先调价或换品,再谈投放");
-    add("合规", "低", "平台规则依赖", "佣金与流量政策随时可能调整", "双平台起步,私域承接 20% 复购");
-  }
-  const W = { 高: 18, 中: 9, 低: 4 };
-  const score = clamp(Math.round(98 - R.reduce((a, r) => a + W[r.level], 0)), 5, 98);
-  const cats = ["现金流", "市场", "运营", "供给", "合规"];
-  const radar = cats.map((c) => ({
-    name: c,
-    score: clamp(100 - R.filter((r) => r.cat === c).reduce((a, r) => a + W[r.level] * 1.6, 0), 25, 100),
-  }));
-  return { risks: R, score, radar };
-}
-
 /* ---------------- AI ---------------- */
 const API_BASE =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) || "/api";
 
-async function callClaude(messages, system, maxTokens = 1000) {
-  // 所有 AI 请求走自家后端网关(apps/server),API Key 永远不出现在前端
-  const res = await fetch(`${API_BASE}/ai/complete`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, system, maxTokens }),
+/**
+ * 前端永远不碰模型,只认自家网关。
+ * 云端版要带登录态,所以请求头由外壳注入,这里不写死。
+ */
+const api = { base: API_BASE, headers: () => ({}) };
+export function configureApi(patch = {}) { Object.assign(api, patch); }
+
+export async function apiFetch(path, init = {}) {
+  const res = await fetch(`${api.base}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...api.headers(), ...(init.headers || {}) },
   });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  const data = await res.json();
-  return data.text || "";
-}
-function parseJSON(text) {
-  let t = (text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  const s = t.indexOf("{"), e = t.lastIndexOf("}");
-  if (s >= 0 && e > s) t = t.slice(s, e + 1);
-  return JSON.parse(t);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.code = data.code;
+    throw err;
+  }
+  return data;
 }
 
-/* ---------------- 套餐:先帮后托 ---------------- */
-const PLANS = {
-  free: { key: "free", name: "帮一把", price: 0, ai: 3, sites: 1, tag: "" },
-  pro: { key: "pro", name: "深度帮", price: 99, ai: 100, sites: 5, tag: "多数人选它" },
-  max: { key: "max", name: "全托管", price: 299, ai: Infinity, sites: 10, tag: "" },
-};
-const PLAN_FEATURES = [
-  ["AI 分析次数", "3 次 / 月", "100 次 / 月", "不限"],
-  ["候选点位 / 平台方案", "1 个", "5 个", "10 个"],
-  ["预算测算与现金流", true, true, true],
-  ["风险识别(规则引擎)", true, true, true],
-  ["AI 深度风险扫描", false, true, true],
-  ["AI 预算体检", false, true, true],
-  ["双线经营看板", true, true, true],
-  ["导出 PDF 报告", false, true, true],
-  ["多店铺管理", false, "3 家", "不限"],
-  ["真人顾问 / 托管对接", false, false, "代运营支持"],
-];
+/**
+ * capability 会一起发给网关:本地版只用来做日志,
+ * 云端版据此判档位、扣额度、归因成本。
+ */
+async function callAI(capability, messages, system, maxTokens) {
+  const data = await apiFetch("/ai/complete", {
+    method: "POST",
+    body: JSON.stringify({
+      messages, system, capability,
+      maxTokens: maxTokens || CAPABILITIES[capability]?.maxTokens || 1000,
+    }),
+  });
+  return data.text || "";
+}
+
+/**
+ * 校验一份持久化下来的店铺数据。缺关键字段就丢掉,让用户回到开店向导重来,
+ * 好过带着半截数据渲染出一堆 undefined。
+ */
+function validStore(s) {
+  if (!s || typeof s !== "object") return null;
+  if (!s.info?.name || !Array.isArray(s.groups)) return null;
+  return { tips: [], source: "tpl", done: {}, opened: false, ...s };
+}
 
 /* ---------------- 通用组件 ---------------- */
 const AppCtx = React.createContext(null);
@@ -968,7 +847,7 @@ function SiteFinder() {
       const q = online
         ? `品类:${project.category};方案:${form.name};货源:${form.supply};客单价:${form.price}元;启动预算:${form.budget}万;内容能力:${form.content};目标人群:${form.audience}`
         : `城市:${project.city};品类:${project.category};点位:${form.name};商圈类型:${form.circle};面积:${form.area}㎡;月租:${form.rent}元;楼层:${form.floor};临街面:${form.frontage}米;周边同类竞品:${form.rivals}家;补充:${form.note}`;
-      const rep = parseJSON(await callClaude([{ role: "user", content: q }], sys, 1000));
+      const rep = parseJSON(await callAI("site", [{ role: "user", content: q }], sys));
       const item = { id: Date.now(), name: form.name, report: rep, form: { ...form } };
       setSites((prev) => {
         const idx = prev.findIndex((s) => s.name === form.name);
@@ -1163,7 +1042,7 @@ function Budget() {
       const q = online
         ? `线上店铺:客单价${p.price}元,日均访客${p.visitors},转化率${pct(p.cvr)}%,毛利率${pct(p.gross)}%,佣金${pct(p.commission)}%,单均物流${p.shipping}元,退货率${pct(p.returnRate)}%,月推广${yuan(p.adSpend)}元,人力${p.staff}人×${yuan(p.salary)}元。启动资金${wan(calc.startup)}万,保本GMV${wan(calc.beRevenue)}万/月,预估月净利${yuan(calc.net)}元。`
         : `线下门店:${p.area}㎡,月租${yuan(p.rent)}元,装修${yuan(p.decorPerSqm)}元/㎡,设备${yuan(p.equipment)}元,客单价${p.price}元,日均客流${p.daily}人,毛利率${pct(p.gross)}%,${p.staff}人×${yuan(p.salary)}元。启动资金${wan(calc.startup)}万,保本月营业额${wan(calc.beRevenue)}万,预估月净利${yuan(calc.net)}元,回本${calc.payback ? calc.payback.toFixed(1) + "个月" : "无法回本"}。`;
-      setDiag(parseJSON(await callClaude([{ role: "user", content: q }], sys, 1000)));
+      setDiag(parseJSON(await callAI("budgetAudit", [{ role: "user", content: q }], sys)));
     } catch { setDiag({ error: true }); } finally { setBusy(false); }
   }
 
@@ -1377,7 +1256,7 @@ function useOpsDiag(buildQuery) {
     setBusy(true);
     try {
       const sys = "你是中国门店运营教练。只输出 JSON,不要解释或代码块标记。字段:summary(整体点评,35字内),highlights(2条做得好的,各25字内),problems(3项数组,每项{title(10字内),why(25字内),fix(30字内)}),todos(3条本周动作,各22字内)";
-      setDiag(parseJSON(await callClaude([{ role: "user", content: buildQuery() }], sys, 1000)));
+      setDiag(parseJSON(await callAI("opsDiag", [{ role: "user", content: buildQuery() }], sys)));
     } catch { setDiag({ error: true }); } finally { setBusy(false); }
   }
   return { diag, busy, run };
@@ -1719,7 +1598,7 @@ function RiskPage() {
       const q = online
         ? `线上店铺,品类${project.category}。客单价${p.price}元,转化率${pct(p.cvr)}%,退货率${pct(p.returnRate)}%,佣金${pct(p.commission)}%,月投流${yuan(p.adSpend)}元,备货${yuan(p.stock)}元,ROI${isFinite(calc.roi) ? calc.roi.toFixed(2) : "负"},月净利${yuan(calc.net)}元。规则引擎已识别:${known}。请补充它没覆盖的风险。`
         : `线下门店,${project.city},品类${project.category}。${p.area}㎡,月租${yuan(p.rent)}元,转让费${yuan(p.transfer)}元,${p.staff}名员工,日均客流假设${p.daily}人,月净利${yuan(calc.net)}元,回本${calc.payback ? calc.payback.toFixed(1) + "个月" : "无法回本"}。规则引擎已识别:${known}。请补充它没覆盖的风险(如租约条款、证照时序、季节性等)。`;
-      setScan(parseJSON(await callClaude([{ role: "user", content: q }], sys, 1000)));
+      setScan(parseJSON(await callAI("riskScan", [{ role: "user", content: q }], sys)));
     } catch { setScan({ error: true }); } finally { setBusy(false); }
   }
 
@@ -1861,7 +1740,7 @@ function Advisor() {
 当前项目:${project.name},${online ? "线上店铺" : "线下实体店"},城市${project.city},品类${project.category}。
 关键数字:启动资金${wan(calc.startup)}万,月固定支出${yuan(calc.fixed)}元,保本${online ? "月GMV" : "月营业额"}${wan(calc.beRevenue)}万,预估月净利${yuan(calc.net)}元,回本${calc.payback ? calc.payback.toFixed(1) + "个月" : "当前假设下无法回本"}。
 回答时把这些数字用起来。`;
-      const reply = await callClaude(next.slice(-8).map((m) => ({ role: m.role, content: m.content })), sys, 1000);
+      const reply = await callAI("advisor", next.slice(-8).map((m) => ({ role: m.role, content: m.content })), sys);
       setChats((c) => ({ ...c, [mode]: [...next, { role: "assistant", content: reply }] }));
     } catch {
       setChats((c) => ({ ...c, [mode]: [...next, { role: "assistant", content: "没连上 AI。检查网络后再发一次。" }] }));
@@ -1930,16 +1809,32 @@ function Advisor() {
 
 /* ================= 前台:订阅 ================= */
 function Billing() {
-  const { plan, setPlan, aiUsed } = useApp();
+  const { plan, setPlan, aiUsed, onCheckout } = useApp();
   const [pick, setPick] = useState(null);
   const [pay, setPay] = useState("wechat");
   const [step, setStep] = useState("choose");
+  const [payErr, setPayErr] = useState("");
 
-  function confirm() {
-    setStep("doing");
-    setTimeout(() => { setPlan(pick); setStep("done"); }, 1400);
+  /**
+   * 没有 onCheckout 时(演示模式)本地直接切档;
+   * 云端版传进来,真去服务端下单 —— 档位以服务端为准,改前端绕不过去。
+   */
+  async function confirm() {
+    setStep("doing"); setPayErr("");
+    try {
+      if (onCheckout) {
+        await onCheckout({ plan: pick, channel: pay });
+      } else {
+        await new Promise((r) => setTimeout(r, 1400));
+        setPlan(pick);
+      }
+      setStep("done");
+    } catch (e) {
+      setPayErr(e.message || "支付失败,请重试");
+      setStep("choose");
+    }
   }
-  function close() { setPick(null); setStep("choose"); }
+  function close() { setPick(null); setStep("choose"); setPayErr(""); }
 
   return (
     <div className="sp-page">
@@ -2045,9 +1940,14 @@ function Billing() {
                 {pay === k && <Check size={16} color={C.profit} />}
               </button>
             ))}
+            {payErr && (
+              <div className="sp-note risk" style={{ marginTop: 12, fontSize: 12 }}>
+                <X size={15} color={C.seal} /><div>{payErr}</div>
+              </div>
+            )}
             <div className="sp-note" style={{ marginTop: 12, fontSize: 12 }}>
               <ShieldCheck size={15} color={C.muted} />
-              <div>这是演示环境,不会真的扣款。点确认后直接解锁功能。</div>
+              <div>当前走的是模拟支付通道,不会真的扣款。点确认后直接解锁功能。</div>
             </div>
             <Btn variant="pri" style={{ width: "100%", marginTop: 14 }} onClick={confirm}>
               确认支付 ¥{Math.round((PLANS[pick]?.price || 0) * 0.7)}
@@ -2267,66 +2167,6 @@ function AdminAI() {
 }
 
 /* ================= 前台:开店向导 ================= */
-const WIZ_DEFAULTS = {
-  offline: { name: "拾豆咖啡 · 文三路店", city: "杭州", category: "精品咖啡", core: "手冲咖啡 + 轻食简餐,做社区第三空间", price: 26, area: 45, circle: "社区底商", cap: 30 },
-  online: { name: "拾豆手冲 · 线上旗舰", city: "全国", category: "咖啡器具", core: "手冲壶、滤杯、家用冲煮套装", price: 89, supply: "自有工厂", platform: "抖音 + 小红书", content: "能拍短视频", cap: 15 },
-};
-
-function tplChecklist(mode, p) {
-  if (mode === "offline") return {
-    source: "tpl",
-    tips: ["先试营业一周再办开业活动,把动线和出品磨顺了,流量来了才接得住", "每一笔支出留发票,月底和「预算测算」页对一次账"],
-    groups: [
-      { name: "证照与合规", items: [
-        { t: "核名并办理营业执照", cost: 0, note: "线上可办" },
-        { t: "食品经营许可证", cost: p.license, note: "餐饮必备" },
-        { t: "确认消防与环评可过", cost: 0, note: "签约之前" }] },
-      { name: "场地与签约", items: [
-        { t: "商圈蹲点数客流(两周)", cost: 0, note: "早中晚各1小时" },
-        { t: "租约谈判与签约付押金", cost: Math.round(p.rent * p.depositMonths), note: `押${p.depositMonths}付1` },
-        { t: "支付转让费", cost: p.transfer, note: "可谈分期" }] },
-      { name: "装修与设备", items: [
-        { t: "装修设计与施工", cost: Math.round(p.area * p.decorPerSqm), note: `约${p.area}㎡` },
-        { t: "设备与家具采购", cost: p.equipment, note: "含安装调试" },
-        { t: "水电与网络开通", cost: 2000, note: "提前预约" }] },
-      { name: "人员与供应", items: [
-        { t: "招聘与岗前培训", cost: Math.round(p.staff * p.salary * 0.5), note: `${p.staff}人` },
-        { t: "供应商比价与签约", cost: 0, note: "至少两家" },
-        { t: "首批原料入库", cost: p.stock, note: "按两周量" }] },
-      { name: "开业启动", items: [
-        { t: "收银点单系统上线", cost: 3000, note: "含小程序" },
-        { t: "开业活动与首月投放", cost: p.launch, note: "" },
-        { t: "试营业一周跑通流程", cost: 0, note: "再正式开业" }] },
-    ],
-  };
-  return {
-    source: "tpl",
-    tips: ["冷启动期 ROI 会难看,先盯转化率和素材点击率,别急着加预算", "退货率是隐形成本,首批 SKU 宁少勿多,跑出数据再加深度"],
-    groups: [
-      { name: "店铺入驻", items: [
-        { t: "选定主攻平台并注册", cost: 0, note: "先单平台" },
-        { t: "缴纳类目保证金", cost: p.bond, note: "闭店可退" },
-        { t: "提交资质与授权", cost: 0, note: "" }] },
-      { name: "视觉与内容", items: [
-        { t: "店铺视觉与详情页", cost: p.visual, note: "含主图" },
-        { t: "拍摄设备与布光", cost: p.gear, note: "" },
-        { t: "首批短视频/图文 20 条", cost: 3000, note: "冷启动素材" }] },
-      { name: "供应链与备货", items: [
-        { t: "供应商签约与打样", cost: 0, note: "" },
-        { t: "首批备货入仓", cost: p.stock, note: "1.5个月量" },
-        { t: "打包物料与快递签约", cost: 2000, note: "谈月结价" }] },
-      { name: "工具与合规", items: [
-        { t: "ERP 与数据工具", cost: p.tools, note: "年费" },
-        { t: "客服话术与售后流程", cost: 0, note: "" },
-        { t: "平台规则与红线学习", cost: 0, note: "避免扣分" }] },
-      { name: "冷启动", items: [
-        { t: "种子用户与首评计划", cost: 1500, note: "" },
-        { t: "首月投流小额测试", cost: p.adSpend, note: "多计划跑" },
-        { t: "达人合作洽谈", cost: 0, note: "先纯佣" }] },
-    ],
-  };
-}
-
 function Wizard({ mode, setMode, onDone }) {
   const { off, on, setOff, setOn, useAI, aiLeft } = useApp();
   const online = mode === "online";
@@ -2350,7 +2190,7 @@ function Wizard({ mode, setMode, onDone }) {
         const q = online
           ? `线上店铺。店名${info.name},品类${info.category},核心产品:${info.core},客单价${price}元,货源${info.supply},意向平台${info.platform},内容能力${info.content},总预算上限${info.cap}万。生成从入驻到冷启动的分阶段开店清单。`
           : `线下实体店。店名${info.name},城市${info.city},品类${info.category},核心产品:${info.core},客单价${price}元,意向面积${info.area}㎡,商圈${info.circle},总预算上限${info.cap}万。生成从筹备到开业的分阶段开店清单。`;
-        const rep = parseJSON(await callClaude([{ role: "user", content: q }], sys, 1400));
+        const rep = parseJSON(await callAI("checklist", [{ role: "user", content: q }], sys));
         if (rep.groups?.length) result = { ...rep, source: "ai" };
       } catch { /* 落到模板 */ }
     }
@@ -2527,7 +2367,7 @@ function Checklist({ go }) {
       const q = online
         ? `线上店铺。店名${inf.name},品类${inf.category},核心产品:${inf.core},客单价${inf.price}元,货源${inf.supply},意向平台${inf.platform}。生成从入驻到冷启动的分阶段开店清单。`
         : `线下实体店。店名${inf.name},城市${inf.city},品类${inf.category},核心产品:${inf.core},客单价${inf.price}元,面积${inf.area}㎡,商圈${inf.circle}。生成从筹备到开业的分阶段开店清单。`;
-      const rep = parseJSON(await callClaude([{ role: "user", content: q }], sys, 1400));
+      const rep = parseJSON(await callAI("checklist", [{ role: "user", content: q }], sys));
       if (rep.groups?.length) setStore({ groups: rep.groups, tips: rep.tips, source: "ai", done: {} });
     } catch { /* 保留原清单 */ } finally { setBusy(false); }
   }
@@ -2607,29 +2447,6 @@ function Checklist({ go }) {
 }
 
 /* ================= 前台:营销活动(运营托)================= */
-const MKT_GOALS = ["开业引爆", "日常拉新", "复购唤醒", "清库存"];
-function tplCampaign(mode, goal, budget, days) {
-  const online = mode === "online";
-  return {
-    source: "tpl",
-    title: `${goal} · ${days} 天行动方案`,
-    hook: online ? "用一个钩子品把新客带进店,再用私域把人留下来" : "用一个引流品把人带进门,再用动线把客单做上去",
-    plays: online ? [
-      { n: "钩子品 9.9 包邮", detail: `选一款成本可控的入门 SKU 做钩子,预算的 30%(约 ${yuan(budget * 0.3)} 元)补运费与差价` },
-      { n: "满减赠品阶梯", detail: "满 99 减 15、满 199 减 40,赠品选高感知低成本的周边" },
-      { n: "老客券私发", detail: "30 天内老客私域一对一发 20 元券,唤醒复购" },
-    ] : [
-      { n: "闲时第二杯半价", detail: "限 14–16 点使用,把最大的闲置产能变成客流" },
-      { n: "集章卡", detail: "买 5 赠 1,把回头率从一次性买卖里拉出来" },
-      { n: "社区地推", detail: `预算的 40%(约 ${yuan(budget * 0.4)} 元)做传单 + 首单立减,半径 800 米` },
-    ],
-    channels: online
-      ? [["投流", 45], ["达人", 25], ["私域", 20], ["站内活动", 10]]
-      : [["到店物料", 35], ["本地点评", 30], ["社群", 20], ["地推", 15]],
-    kpi: [`按客单价与预算估,活动期新增约 ${Math.max(20, Math.round(budget / 40))} 单`, "活动 ROI 目标 ≥ 1.5,低于 1 立即停"],
-    warn: "折扣一旦变成常态就收不回来了。写死截止时间,严格执行。",
-  };
-}
 function Marketing() {
   const { mode, store, useAI, accent } = useApp();
   const online = mode === "online";
@@ -2646,7 +2463,7 @@ function Marketing() {
       try {
         const sys = "你是中国零售营销操盘手。只输出 JSON,不要解释或代码块标记。字段:title(方案名,14字内),hook(核心主张,24字内),plays(3项数组,每项{n(玩法名,10字内),detail(执行细节含金额,40字内)}),channels(4项数组,每项[渠道名,预算占比数字]),kpi(2条预期效果,各22字内),warn(1条风险提醒,30字内)";
         const q = `${online ? "线上店铺" : "线下门店"},品类${store.info.category},核心产品:${store.info.core},客单价${store.info.price}元。活动目标:${goal},预算${budget}元,时长${days}天。给出可直接执行的营销方案。`;
-        const rep = parseJSON(await callClaude([{ role: "user", content: q }], sys, 1200));
+        const rep = parseJSON(await callAI("campaign", [{ role: "user", content: q }], sys));
         if (rep.plays?.length) result = { ...rep, source: "ai" };
       } catch { /* 落到模板 */ }
     }
@@ -2830,12 +2647,29 @@ function Hosting() {
 }
 
 /* ================= 应用主壳 ================= */
-export default function Utobang() {
+/**
+ * 业务主壳。
+ *
+ * edition 决定装配出哪个版本(见 editions.js):自部署版没有订阅、后台和托管,
+ * 多一个「模型设置」;云端版反过来。业务页面两版共用,不分叉。
+ *
+ * account / onPlanChange 只有云端版会传:账号信息与档位由服务端下发,
+ * 本地版走 edition.plan 常量。
+ */
+export default function UtobangApp({
+  edition = LOCAL_EDITION,
+  account = null,
+  onPlanChange,
+  onCheckout = null,
+  onSignOut,
+  extraPages = {},
+  persistence = null,
+} = {}) {
   const [view, setView] = useState("front");
   const [tab, setTab] = useState("overview");
   const [adminTab, setAdminTab] = useState("dash");
   const [mode, setMode] = useState("offline");
-  const [plan, setPlan] = useState("free");
+  const [localPlan, setLocalPlan] = useState("free");
   const [aiUsed, setAiUsed] = useState(0);
   const [payOpen, setPayOpen] = useState(false);
   const [payMsg, setPayMsg] = useState("");
@@ -2844,18 +2678,51 @@ export default function Utobang() {
   const [chats, setChats] = useState({ offline: null, online: null });
   const [stores, setStores] = useState({ offline: null, online: null });
 
-  const [off, setOff] = useState({
-    area: 45, rent: 12000, depositMonths: 3, transfer: 40000, decorPerSqm: 1800,
-    equipment: 80000, stock: 30000, license: 5000, launch: 15000,
-    staff: 2, salary: 5500, utility: 2500, otherFixed: 1200,
-    price: 26, daily: 110, gross: 0.62, days: 30, reserveMonths: 3,
-  });
-  const [on, setOn] = useState({
-    bond: 5000, stock: 60000, visual: 12000, gear: 15000, tools: 3600,
-    price: 89, visitors: 3000, cvr: 0.023, gross: 0.55, commission: 0.05,
-    shipping: 6.5, returnRate: 0.12, adSpend: 40000,
-    staff: 2, salary: 6000, otherFixed: 2000, reserveMonths: 3,
-  });
+  // 不计次的版本一律按最高档跑,页面里那些 plan === "free" 的门禁自然全开
+  const plan = edition.metering ? (account?.plan || localPlan) : (edition.plan || "max");
+  const setPlan = (p) => (onPlanChange ? onPlanChange(p) : setLocalPlan(p));
+
+  const [off, setOff] = useState(DEFAULT_OFFLINE);
+  const [on, setOn] = useState(DEFAULT_ONLINE);
+
+  /**
+   * 数据持久化(可选)。
+   * 自部署版不传 persistence —— 数据只在内存里,关掉标签页就没了,这是刻意的:
+   * 零数据库、零运维、隐私最好。云端版传进来,业务数据落库,换设备也在。
+   */
+  const [hydrated, setHydrated] = useState(!persistence);
+  useEffect(() => {
+    if (!persistence) return;
+    let alive = true;
+    persistence.load()
+      .then((snap) => {
+        if (!alive || !snap) return;
+        // 快照可能来自旧版本或被改坏了,形状不对就当没有 —— 不能让用户卡在白屏上
+        if (snap.stores) setStores({
+          offline: validStore(snap.stores.offline),
+          online: validStore(snap.stores.online),
+        });
+        if (snap.sitesAll) setSitesAll({
+          offline: Array.isArray(snap.sitesAll.offline) ? snap.sitesAll.offline : [],
+          online: Array.isArray(snap.sitesAll.online) ? snap.sitesAll.online : [],
+        });
+        if (snap.chats) setChats({ offline: snap.chats.offline ?? null, online: snap.chats.online ?? null });
+        if (snap.off) setOff({ ...DEFAULT_OFFLINE, ...snap.off });
+        if (snap.on) setOn({ ...DEFAULT_ONLINE, ...snap.on });
+      })
+      .catch(() => { /* 读不到就当新用户,不挡在门外 */ })
+      .finally(() => alive && setHydrated(true));
+    return () => { alive = false; };
+  }, [persistence]);
+
+  // 防抖写回:改一个数字就发一次请求太浪费
+  useEffect(() => {
+    if (!persistence || !hydrated) return;
+    const t = setTimeout(() => {
+      persistence.save({ stores, sitesAll, chats, off, on }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [persistence, hydrated, stores, sitesAll, chats, off, on]);
 
   const store = stores[mode];
   const setStore = (patch) => setStores((all) => ({
@@ -2873,10 +2740,22 @@ export default function Utobang() {
   const riskInfo = useMemo(() => detectRisks(mode, mode === "online" ? on : off, calc), [mode, on, off, calc]);
   const accent = ACCENTS[mode];
 
-  const quota = PLANS[plan].ai;
+  const quota = edition.metering ? PLANS[plan].ai : Infinity;
   const aiLeft = quota === Infinity ? Infinity : Math.max(0, quota - aiUsed);
-  function openPay(msg) { setPayMsg(msg); setPayOpen(true); }
+
+  // 本地先自增让额度条立刻动;服务端每次回传真实用量时校正过来
+  const serverUsed = account?.aiUsed;
+  useEffect(() => {
+    if (typeof serverUsed === "number") setAiUsed(serverUsed);
+  }, [serverUsed]);
+
+  /** 不带订阅的版本没有付费墙,提示直接吞掉 */
+  function openPay(msg) {
+    if (!edition.billing) return;
+    setPayMsg(msg); setPayOpen(true);
+  }
   function useAI() {
+    if (!edition.metering) return true;
     if (aiLeft === Infinity) return true;
     if (aiLeft <= 0) {
       openPay(plan === "free"
@@ -2889,6 +2768,7 @@ export default function Utobang() {
   }
 
   const ctx = {
+    edition, account, onSignOut, onCheckout,
     mode, plan, setPlan, aiUsed, aiLeft, useAI, openPay,
     sites: sitesAll[mode],
     setSites: (updater) => setSitesAll((all) => ({
@@ -2912,7 +2792,12 @@ export default function Utobang() {
     { k: "ops", label: "日常运营", icon: Activity, ai: true },
     { k: "report", label: "数据报表", icon: TrendingUp },
     { k: "marketing", label: "营销活动", icon: Megaphone, ai: true },
-    { k: "hosting", label: "托管服务", icon: Headset },
+    ...(edition.hosting ? [{ k: "hosting", label: "托管服务", icon: Headset }] : []),
+  ];
+  /** 通用组:两版各挂各的 —— 云端是订阅账单,自部署是模型设置 */
+  const NAV_COMMON = [
+    ...(edition.billing ? [{ k: "billing", label: "订阅与账单", icon: Receipt }] : []),
+    ...(edition.settings ? [{ k: "settings", label: "模型设置", icon: Wrench }] : []),
   ];
   const ADMIN_NAV = [
     { k: "dash", label: "平台看板", icon: TrendingUp },
@@ -2920,13 +2805,15 @@ export default function Utobang() {
     { k: "ai", label: "AI 用量监控", icon: Server },
   ];
 
-  const isAdmin = view === "admin";
+  const isAdmin = edition.admin && view === "admin";
   const opened = !!store?.opened;
+  /** 这些页面不依赖店铺,未建店也能直接进 */
+  const STANDALONE = new Set(["billing", "settings", "hosting"]);
 
   let page;
   if (isAdmin) {
     page = adminTab === "dash" ? <AdminDash /> : adminTab === "users" ? <AdminUsers /> : <AdminAI />;
-  } else if (!store && tab !== "billing" && tab !== "hosting") {
+  } else if (!store && !STANDALONE.has(tab)) {
     page = <Wizard mode={mode} setMode={setMode}
       onDone={(info, planObj) => {
         setStores((all) => ({
@@ -2946,7 +2833,10 @@ export default function Utobang() {
       : tab === "hosting" ? <Hosting />
       : tab === "risk" ? <RiskPage />
       : tab === "advisor" ? <Advisor />
-      : <Billing />;
+      : tab === "settings" ? <LLMSettings apiFetch={apiFetch} />
+      : extraPages[tab] ? extraPages[tab]()
+      : edition.billing ? <Billing />
+      : <Overview go={setTab} />;
   }
 
   function clickNav(k, locked) {
@@ -2960,7 +2850,7 @@ export default function Utobang() {
     } else {
       setLockInfo({
         title: "开业后解锁",
-        msg: "「日常运营」「数据报表」「营销活动」在开业后解锁(托管服务随时可看)。先到「开店清单」把主要任务(60% 以上)做完,点「标记已开业」。",
+        msg: `「日常运营」「数据报表」「营销活动」在开业后解锁${edition.hosting ? "(托管服务随时可看)" : ""}。先到「开店清单」把主要任务(60% 以上)做完,点「标记已开业」。`,
         btn: "去开店清单", to: "checklist",
       });
     }
@@ -2976,19 +2866,21 @@ export default function Utobang() {
               <div className="sp-mark"><HandHelping size={15} /></div>
               <div>
                 <div className="sp-brand-name">乌托帮</div>
-                <div className="sp-brand-sub">UTOBANG · 先帮后托</div>
+                <div className="sp-brand-sub">{edition.brandSub}</div>
               </div>
             </div>
           </div>
 
-          <div className="sp-viewseg">
-            <button className={!isAdmin ? "on" : ""} onClick={() => setView("front")}>
-              <Store size={13} />业务前台
-            </button>
-            <button className={isAdmin ? "on" : ""} onClick={() => setView("admin")}>
-              <Building2 size={13} />管理后台
-            </button>
-          </div>
+          {edition.admin && (
+            <div className="sp-viewseg">
+              <button className={!isAdmin ? "on" : ""} onClick={() => setView("front")}>
+                <Store size={13} />业务前台
+              </button>
+              <button className={isAdmin ? "on" : ""} onClick={() => setView("admin")}>
+                <Building2 size={13} />管理后台
+              </button>
+            </div>
+          )}
 
           <div className="sp-navlist">
             {isAdmin ? (
@@ -3004,7 +2896,7 @@ export default function Utobang() {
               <>
                 <div className="sp-navgroup"><i />开店帮 · 把账算明白</div>
                 {!store && (
-                  <button className={`sp-navitem ${tab !== "billing" && tab !== "hosting" ? "on" : ""}`}
+                  <button className={`sp-navitem ${!STANDALONE.has(tab) ? "on" : ""}`}
                     onClick={() => setTab("overview")}>
                     <Sparkles size={16} strokeWidth={1.9} />开店设置
                     <span className="badge">3 步</span>
@@ -3035,15 +2927,17 @@ export default function Utobang() {
                     </button>
                   );
                 })}
-                <div className="sp-navgroup"><i />通用</div>
-                <button className={`sp-navitem ${tab === "billing" ? "on" : ""}`} onClick={() => setTab("billing")}>
-                  <Receipt size={16} strokeWidth={1.9} />订阅与账单
-                </button>
+                {NAV_COMMON.length > 0 && <div className="sp-navgroup"><i />通用</div>}
+                {NAV_COMMON.map((n) => (
+                  <button key={n.k} className={`sp-navitem ${tab === n.k ? "on" : ""}`} onClick={() => setTab(n.k)}>
+                    <n.icon size={16} strokeWidth={1.9} />{n.label}
+                  </button>
+                ))}
               </>
             )}
           </div>
 
-          {!isAdmin && (
+          {!isAdmin && edition.metering && (
             <div className="sp-quota">
               <div className="sp-quota-top">
                 <span className="sp-quota-label">AI 额度 · {PLANS[plan].name}</span>
@@ -3091,7 +2985,11 @@ export default function Utobang() {
                   </button>
                 </div>
                 <div className="sp-topright">
-                  <Tag tone={plan === "free" ? "" : "brand"}>{plan !== "free" && <Crown size={11} />}{PLANS[plan].name}</Tag>
+                  {edition.showPlanTag && (
+                    <Tag tone={plan === "free" ? "" : "brand"}>{plan !== "free" && <Crown size={11} />}{PLANS[plan].name}</Tag>
+                  )}
+                  {account && <Tag tone="dark"><UserRound size={11} />{account.email}</Tag>}
+                  {onSignOut && <Btn size="sm" onClick={onSignOut}>退出</Btn>}
                 </div>
               </>
             )}

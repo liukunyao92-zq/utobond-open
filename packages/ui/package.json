@@ -1,0 +1,22 @@
+{
+  "name": "@utobond/ui",
+  "version": "0.4.0",
+  "description": "乌托帮业务界面(React):开店向导、清单、预算、选址、风险、参谋、运营、报表、营销。按 edition 装配不同版本",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./editions": "./src/editions.js"
+  },
+  "files": ["src"],
+  "dependencies": {
+    "@utobond/core": "0.4.0"
+  },
+  "peerDependencies": {
+    "lucide-react": ">=0.383.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.12.7"
+  }
+}
