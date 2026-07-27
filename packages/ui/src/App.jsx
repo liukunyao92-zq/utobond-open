@@ -442,7 +442,7 @@ export async function apiFetch(path, init = {}) {
 }
 
 /**
- * capability 会一起发给网关:本地版只用来做日志,
+ * capability 会一起发给网关:当前应用只用来做日志,
  * 云端版据此判档位、扣额度、归因成本。
  */
 async function callAI(capability, messages, system, maxTokens) {
@@ -2651,11 +2651,11 @@ function Hosting() {
 /**
  * 业务主壳。
  *
- * edition 决定装配出哪个版本(见 editions.js):自部署版没有订阅、后台和托管,
+ * edition 决定装配哪些能力(见 editions.js):当前应用没有订阅、后台和托管,
  * 多一个「模型设置」;云端版反过来。业务页面两版共用,不分叉。
  *
  * account / onPlanChange 只有云端版会传:账号信息与档位由服务端下发,
- * 本地版走 edition.plan 常量。
+ * 本机运行模式走 edition.plan 常量。
  */
 export default function UtobangApp({
   edition = LOCAL_EDITION,
@@ -2688,7 +2688,7 @@ export default function UtobangApp({
 
   /**
    * 数据持久化(可选)。
-   * 自部署版不传 persistence —— 数据只在内存里,关掉标签页就没了,这是刻意的:
+   * 当前应用不传 persistence —— 数据只在内存里,关掉标签页就没了,这是刻意的:
    * 零数据库、零运维、隐私最好。云端版传进来,业务数据落库,换设备也在。
    */
   const [hydrated, setHydrated] = useState(!persistence);
@@ -2789,14 +2789,14 @@ export default function UtobangApp({
     { k: "risk", label: "风险识别", icon: ShieldAlert, ai: true },
     { k: "advisor", label: "AI 参谋", icon: Bot, ai: true },
   ];
-  /** 「托」板块整组随 edition.ops 走 —— 自部署版没有这一板块 */
+  /** 「托」板块整组随 edition.ops 走 —— 当前应用不装配这一板块 */
   const NAV_OPS = edition.ops ? [
     { k: "ops", label: "日常运营", icon: Activity, ai: true },
     { k: "report", label: "数据报表", icon: TrendingUp },
     { k: "marketing", label: "营销活动", icon: Megaphone, ai: true },
     ...(edition.hosting ? [{ k: "hosting", label: "托管服务", icon: Headset }] : []),
   ] : [];
-  /** 「自定义」板块:云端是订阅账单,自部署是模型设置 */
+  /** 「自定义」板块根据 edition 装配订阅账单或模型设置 */
   const NAV_COMMON = [
     ...(edition.billing ? [{ k: "billing", label: "订阅与账单", icon: Receipt }] : []),
     ...(edition.settings ? [{ k: "settings", label: "模型设置", icon: Wrench }] : []),

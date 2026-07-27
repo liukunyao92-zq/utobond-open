@@ -21,7 +21,7 @@ PRESETS = {
         "defaultModel": "deepseek-chat",
         "keyHint": "sk-…",
         "site": "https://platform.deepseek.com",
-        "note": "性价比高,中文场景表现稳,自部署首选。",
+        "note": "性价比高,中文场景表现稳,推荐首选。",
     },
     "openai": {
         "id": "openai",

@@ -1,11 +1,11 @@
-"""乌托帮 · 自部署版后端(Python / FastAPI)。
+"""乌托帮后端(Python / FastAPI)。
 
 职责只有两件:
   1. 转发 AI 请求 —— Key 留在服务端,前端永远拿不到
   2. 读写模型配置 —— 让用户在网页上换供应商,不用重启
 
 没有用户、没有数据库、没有计费。数据都在浏览器里,关掉标签页就没了 ——
-这是自部署版的取舍:零依赖、零运维、隐私最好。
+这是当前项目的取舍:零数据库、低运维、业务数据默认留在浏览器内存。
 
 启动:
   uvicorn main:app --port 8787
@@ -165,7 +165,7 @@ async def ai_stream(request: Request):
                              headers={"Cache-Control": "no-cache"})
 
 
-# ---- 模型设置:仅自部署版提供。云端版没有这些接口,平台 Key 不能让用户读写 ----
+# ---- 模型设置 API:完整 Key 仅在服务端流转 ----
 
 @app.get("/api/settings/llm")
 def settings_get():
@@ -230,7 +230,7 @@ if _dist.is_dir():
 def print_startup():
     cfg = describe_config()
     port = os.environ.get("PORT", "8787")
-    print(f"[utobond] 自部署版后端已启动 → http://localhost:{port}")
+    print(f"[utobond] 后端已启动 → http://localhost:{port}")
     if is_configured(load_config()):
         src = "配置文件" if cfg["source"] == "file" else "环境变量"
         print(f'[utobond] 模型:{cfg["provider"]} / {cfg["model"]}(来自{src})')

@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { UtobangApp, LOCAL_EDITION } from "@utobond/ui";
 
 /**
- * 自部署版入口。
+ * 乌托帮 Web 入口。
  * 没有登录、没有订阅、没有平台后台 —— 打开就能用,AI 走你自己配的模型。
  */
 ReactDOM.createRoot(document.getElementById("root")).render(

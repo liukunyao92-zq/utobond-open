@@ -1,18 +1,18 @@
-# 乌托帮 UTOBANG · 自部署版
+# 乌托帮 UTOBANG
 
 [![CI](https://github.com/liukunyao92-zq/utobond-open/actions/workflows/ci.yml/badge.svg)](https://github.com/liukunyao92-zq/utobond-open/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-> 开店前把账算明白的帮助台。这是**开源自部署版**:Python 后端 + React 前端,
-> 接你自己的大模型 API,Key 由本机保管,不限次数。
+> 开店前把账算明白的帮助台。Python 后端 + React 前端,
+> 接入你自己的大模型 API,Key 由本机保管,不限次数。
 
 面向小微创业者,两条主线各一套模型:
 
 - **线下实体店** —— 选址、装修、证照、排班。最怕「签了约才发现算不过账」。
 - **线上店铺** —— 流量、转化、投流、退货率。最怕「钱投出去了单没回来」。
 
-自部署版包含两个板块:**帮(开店帮助)** 和 **自定义(模型设置)**。
-「托(运营托管)」是云端版的商业服务,开源版不含。
+当前项目包含两个板块:**帮(开店帮助)** 和 **自定义(模型设置)**。
+日常运营托管、账号与订阅不在当前项目范围内。
 
 ## 它能干什么
 
@@ -34,13 +34,30 @@
 
 需要 Node.js ≥ 20.19(跑前端)和 Python ≥ 3.9(跑后端)。
 
+一条命令启动：
+
 ```bash
-npm install       # 前端依赖
-npm run setup     # 后端 venv + pip 依赖
-npm run dev       # 一键起前后端
+python3 start.py
 ```
 
-打开 http://localhost:5173,左侧「模型设置」填入你的 API Key 即可。后端在 8787。
+首次运行会自动创建 Python 虚拟环境、安装依赖、构建前端并启动服务；后续仅在依赖或源码变化时刷新。打开 http://localhost:8787，左侧「模型设置」填入你的 API Key 即可。
+
+可选参数：
+
+```bash
+python3 start.py --host 0.0.0.0 --port 9000
+python3 start.py --refresh  # 强制刷新依赖并重新构建
+```
+
+需要前后端热更新时使用开发模式：
+
+```bash
+npm install
+npm run setup
+npm run dev
+```
+
+开发模式前端地址为 http://localhost:5173，API 服务在 8787。
 
 也可以先写进环境变量:
 
@@ -54,7 +71,7 @@ cp apps/server/.env.example apps/server/.env
 
 | 供应商 | 协议 | 备注 |
 |---|---|---|
-| DeepSeek | OpenAI | 性价比高,中文场景稳,推荐自部署首选 |
+| DeepSeek | OpenAI | 性价比高,中文场景稳,推荐首选 |
 | OpenAI | OpenAI | 国内直连通常需要代理 |
 | Claude(Anthropic) | Anthropic | 结构化输出稳定 |
 | 月之暗面 Kimi / 智谱 GLM / 阿里通义千问 | OpenAI | 智谱 glm-4-flash 有免费额度,适合先跑通 |
@@ -81,19 +98,20 @@ cp apps/server/.env.example apps/server/.env
 
 ```
 utobond-open/
+├── start.py       Python 一键启动器
 ├── packages/
 │   ├── core/     @utobond/core  纯逻辑:预算引擎、风险规则、内置模板、AI 能力契约(带单测)
 │   └── ui/       @utobond/ui    业务界面(React),按 edition 装配
 ├── apps/
-│   ├── web/      自部署版前端外壳(Vite)
-│   └── server/   自部署版后端(Python / FastAPI:AI 网关 + 模型设置,带 pytest 单测)
+│   ├── web/      Web 前端(Vite)
+│   └── server/   Python / FastAPI 后端:AI 网关 + 模型设置(带 pytest 单测)
 └── docs/
     ├── PRD.md          产品稿
-    └── SELF-HOSTING.md 自部署与运维
+    └── SELF-HOSTING.md 部署与运维
 ```
 
-`packages/ui` 用一个 `edition` 配置对象控制装配 —— 自部署版只开「帮 + 自定义」,
-关掉订阅、付费墙、平台后台和「托」板块。业务页面本身与云端版共用同一份代码。
+`packages/ui` 用一个 `edition` 配置对象控制能力装配。当前入口启用「帮 + 自定义」,
+不装配订阅、付费墙、平台后台和「托」板块。
 
 ```bash
 npm test        # core + 后端测试；core 行覆盖率门槛 90%，后端总覆盖率门槛 75%
@@ -101,16 +119,16 @@ npm run build   # 产出 apps/web/dist;Python 后端检测到 dist 会直接托�
 npm run check   # 发布前完整检查:测试 + 生产构建
 ```
 
-## 自部署版不做什么
+## 产品边界
 
 刻意不做,不是没做完:
 
 - **没有账号体系** —— 打开就能用
 - **不落库** —— 业务数据只在浏览器内存里,关掉标签页就没了。换来的是零数据库、零运维、隐私最好
 - **没有订阅和额度** —— 你用自己的 Key,想调多少次是你和供应商之间的事
-- **没有「托」板块** —— 日常运营、数据报表、营销活动、真人托管属于云端版
+- **没有「托」板块** —— 日常运营、数据报表、营销活动、真人托管需要另行扩展
 
-需要多设备同步、开箱即用不配 Key、以及运营托管服务的,那是云端 SaaS 版(闭源,另一个仓库)。
+多设备同步、平台统一模型 Key 和运营托管服务可在此项目之外按实际需求接入。
 
 ## 许可证
 

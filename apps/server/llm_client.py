@@ -1,7 +1,7 @@
 """统一 LLM 客户端。
 
 对外只有三个函数:chat_complete / chat_stream / test_connection。
-只依赖 httpx,不引任何供应商 SDK —— 自部署用户换供应商不需要装第二个包,
+只依赖 httpx,不引任何供应商 SDK —— 用户换供应商不需要装第二个包,
 中转站的各种小差异也好绕。
 """
 import json
