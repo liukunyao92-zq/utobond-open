@@ -9,23 +9,62 @@ import { clamp, pct } from "./format.js";
 const WEIGHT = { 高: 18, 中: 9, 低: 4 };
 const CATS = ["现金流", "市场", "运营", "供给", "合规"];
 
-export function detectRisks(mode, p, calc) {
+export function detectRisks(mode, p, calc, context = {}) {
   const R = [];
   const add = (cat, level, title, detail, fix) => R.push({ cat, level, title, detail, fix });
+  const category = String(context.category || "");
+  const core = String(context.core || "");
+  const businessText = `${category} ${core}`;
+  const serviceBusiness = /培训|训练|运动|健身|网球|羽毛球|篮球|瑜伽|教育|摄影|美容|咨询|服务/.test(businessText);
+  const foodBusiness = /餐饮|咖啡|茶饮|烘焙|小吃|食品|酒吧|甜品|轻食/.test(businessText);
+  const siteReports = Array.isArray(context.sites)
+    ? context.sites.filter((site) => Number.isFinite(Number(site?.report?.score))) : [];
+
+  if (siteReports.length === 0) {
+    add("市场", "低", mode === "online" ? "尚未完成平台验证" : "尚未完成选址验证",
+      mode === "online" ? "当前项目还没有保存平台匹配报告" : "当前项目还没有保存真实候选点位报告",
+      mode === "online" ? "到平台选择页保存至少一个候选方案" : "到选址分析页录入真实点位并生成报告");
+  } else {
+    const best = siteReports.reduce((winner, site) => Number(site.report.score) > Number(winner.report.score) ? site : winner);
+    const linkedSite = siteReports.find((site) => site.adopted) || best;
+    const candidateLabel = linkedSite.adopted ? "已采用候选" : "当前最高分候选";
+    const score = Number(linkedSite.report.score);
+    if (score < 50) add("市场", "高", `${mode === "online" ? "平台" : "选址"}评分仅 ${score} 分`,
+      `${candidateLabel}「${linkedSite.name}」仍低于 50 分`, "先补充新候选，不要用低分方案倒推预算");
+    else if (score < 65) add("市场", "中", `${mode === "online" ? "平台" : "选址"}评分 ${score} 分`,
+      `${candidateLabel}「${linkedSite.name}」仍处于谨慎区`, "按报告行动项复核后再确定最终方案");
+    else if (linkedSite.report.risks?.[0]) add("市场", "低", `${mode === "online" ? "平台" : "选址"}报告仍有关注项`,
+      String(linkedSite.report.risks[0]), String(linkedSite.report.actions?.[0] || "把报告风险写入签约或上线前检查表"));
+
+    if (mode === "offline" && Number(linkedSite.form?.rent) > 0 && Number(p.rent) > 0) {
+      const rentGap = Math.abs(Number(linkedSite.form.rent) - Number(p.rent)) / Number(p.rent);
+      if (rentGap > 0.15) add("现金流", "中", "候选点位租金与预算未同步",
+        `「${linkedSite.name}」月租 ${Math.round(linkedSite.form.rent)} 元，预算页仍是 ${Math.round(p.rent)} 元`,
+        "回到选址报告采用该点位的面积与租金参数");
+    }
+  }
+
   if (mode === "offline") {
+    const booking = p.revenueModel === "booking";
     const rentRatio = p.rent / calc.revenue;
-    if (rentRatio > 0.2) add("现金流", "高", `房租占营业额 ${pct(rentRatio)}%`, "超过 20% 的警戒线,旺季也难覆盖", "谈免租期或降租;或先验证客单价能否提 10%");
+    if (rentRatio > 0.2) add("现金流", "高", `房租占营业额 ${pct(rentRatio)}%`, "超过 20% 的警戒线,旺季也难覆盖", `谈免租期或降租;或先验证${booking ? "时段单价" : "客单价"}能否提 10%`);
     else if (rentRatio > 0.13) add("现金流", "中", `房租占营业额 ${pct(rentRatio)}%`, "处于 13–20% 的敏感区", "合同里锁定两年租金涨幅上限");
     if (p.reserveMonths < 3) add("现金流", "中", `备用金仅 ${p.reserveMonths} 个月`, "爬坡期通常要 3–4 个月才稳", "备用金补足到 3 个月固定支出");
     if (!calc.payback || calc.payback > 18) add("现金流", "高", "回本周期超过 18 个月", "期间任何波动都会被放大", "装修和设备砍 20%,先轻资产验证");
     else if (calc.payback > 12) add("现金流", "低", `回本约 ${calc.payback.toFixed(1)} 个月`, "在 12–18 个月区间,可接受但偏慢", "开业前三个月每周对一次现金流");
-    if (p.daily < calc.beDaily) add("市场", "高", "客流假设低于保本线", `保本要 ${Math.round(calc.beDaily)} 人/天,当前假设 ${p.daily} 人`, "签约前先蹲点两周实数人流");
+    if (booking && p.utilization < calc.beUtilization) {
+      add("市场", "高", "预约利用率低于保本线", `保本利用率要 ${pct(calc.beUtilization)}%,当前假设 ${pct(p.utilization)}%`, "按工作日/周末拆分预约率,先做预售验证需求");
+    } else if (!booking && p.daily < calc.beDaily) {
+      add("市场", "高", "客流假设低于保本线", `保本要 ${Math.round(calc.beDaily)} 人/天,当前假设 ${p.daily} 人`, "签约前先蹲点两周实数人流");
+    }
     const sunk = (calc.depositAmt + p.transfer) / calc.startup;
     if (sunk > 0.35) add("市场", "中", `沉没成本占启动资金 ${pct(sunk)}%`, "押金加转让费不产生任何营收", "转让费谈分期,整体压到 30% 以内");
     const laborRatio = (p.staff * p.salary) / calc.revenue;
     if (laborRatio > 0.25) add("运营", "中", `人力占营业额 ${pct(laborRatio)}%`, "超过 25% 说明排班有冗余", "高峰时段兼职化:1 全职 + 2 兼职起步");
-    if (p.license < 3000) add("合规", "低", "证照预算偏紧", "餐饮类含食品经营许可通常 3000 元起", "签约前确认物业能过环评和消防");
-    add("供给", "低", "单一供应商依赖", "主要原料断供,门店直接停摆", "关键原料至少备两家供应商比价");
+    if (foodBusiness && p.license < 3000) add("合规", "低", "证照预算偏紧", "餐饮类含食品经营许可通常 3000 元起", "签约前确认物业能过环评和消防");
+    add("供给", "低", serviceBusiness ? "核心场地与人员依赖" : "单一供应商依赖",
+      serviceBusiness ? "场地、设备或核心服务人员中断会直接影响履约" : "主要原料断供,门店直接停摆",
+      serviceBusiness ? "关键设备准备替代方案,核心岗位至少两人可覆盖" : "关键原料至少备两家供应商比价");
   } else {
     const adRatio = p.adSpend / calc.validGmv;
     if (adRatio > 0.3) add("现金流", "高", `投流占 GMV ${pct(adRatio)}%`, "停投即停单,现金消耗极快", "ROI 低于 1.8 的计划全停,先做自然流");

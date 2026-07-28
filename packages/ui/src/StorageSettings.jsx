@@ -216,10 +216,10 @@ export function StorageSettings({ apiFetch }) {
           <table className="sp-tbl">
             <thead><tr><th>数据</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td>店铺与开店清单</td><td style={{ color: "var(--muted)" }}>店铺资料、任务分组、完成状态</td></tr>
-              <tr><td>预算参数</td><td style={{ color: "var(--muted)" }}>线上和线下预算测算输入</td></tr>
-              <tr><td>候选方案</td><td style={{ color: "var(--muted)" }}>选址或平台候选与比较结果</td></tr>
-              <tr><td>AI 参谋记录</td><td style={{ color: "var(--muted)" }}>当前线上、线下会话快照</td></tr>
+              <tr><td>开店项目与清单</td><td style={{ color: "var(--muted)" }}>项目列表、店铺资料、任务分组与完成状态</td></tr>
+              <tr><td>项目预算参数</td><td style={{ color: "var(--muted)" }}>每个项目独立的线上或线下预算输入</td></tr>
+              <tr><td>项目候选方案</td><td style={{ color: "var(--muted)" }}>每个项目独立的选址或平台分析结果</td></tr>
+              <tr><td>AI 参谋记录</td><td style={{ color: "var(--muted)" }}>每个项目独立的会话与经营上下文</td></tr>
             </tbody>
           </table>
         </div>

@@ -20,6 +20,30 @@ test("线下:保本日客流处按保本营业额换算,且与毛利率联动", 
   assert.ok(worse.beDaily > c.beDaily, "毛利率降低,保本客流应上升");
 });
 
+test("线下预约制:按时段容量与利用率估算收入和保本利用率", () => {
+  const p = {
+    ...DEFAULT_OFFLINE,
+    revenueModel: "booking",
+    price: 60,
+    slotMinutes: 30,
+    capacityUnits: 4,
+    openHours: 12,
+    utilization: 0.5,
+    days: 30,
+  };
+  const c = calcOffline(p);
+  assert.equal(c.dailyCapacitySlots, 96);
+  assert.equal(c.dailyBookedSlots, 48);
+  assert.equal(c.monthlyBookedSlots, 1440);
+  assert.equal(c.revenue, 86400);
+  assert.equal(c.hourlyRate, 120);
+  assert.ok(Math.abs(c.beUtilization - c.beRevenue / 30 / 60 / 96) < 1e-9);
+
+  const low = { ...p, utilization: 0.01 };
+  const risks = detectRisks("offline", low, calcOffline(low));
+  assert.ok(risks.risks.some((risk) => risk.title.includes("预约利用率低于保本线")));
+});
+
 test("线上:退货率吃掉 GMV,单均模型为负时应报高风险", () => {
   const c = calcOnline(DEFAULT_ONLINE);
   assert.ok(c.validGmv < c.gmv);
@@ -45,6 +69,27 @@ test("风险分随高危项增加而下降,且始终在 5–98 区间", () => {
   assert.ok(worse.score < good.score);
   for (const s of [good.score, worse.score]) assert.ok(s >= 5 && s <= 98);
   assert.equal(good.radar.length, 5);
+});
+
+test("风险识别联动项目品类与选址报告", () => {
+  const p = { ...DEFAULT_OFFLINE, license: 1000 };
+  const context = {
+    category: "网球训练馆",
+    core: "网球场地预约与教练训练",
+    sites: [{
+      name: "城西候选馆",
+      form: { rent: 20000 },
+      report: { score: 58, risks: ["停车位不足"], actions: ["晚高峰实测停车"] },
+    }],
+  };
+  const risks = detectRisks("offline", p, calcOffline(p), context).risks;
+  assert.ok(risks.some((risk) => risk.title.includes("选址评分 58 分")));
+  assert.ok(risks.some((risk) => risk.title === "候选点位租金与预算未同步"));
+  assert.ok(risks.some((risk) => risk.title === "核心场地与人员依赖"));
+  assert.ok(!risks.some((risk) => risk.title === "证照预算偏紧"), "非餐饮项目不应套用食品证照风险");
+
+  const foodRisks = detectRisks("offline", p, calcOffline(p), { category: "精品咖啡" }).risks;
+  assert.ok(foodRisks.some((risk) => risk.title === "证照预算偏紧"));
 });
 
 test("内置模板:五个阶段,金额跟着预算参数走", () => {

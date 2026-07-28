@@ -13,7 +13,9 @@ export const DEFAULT_OFFLINE = {
   area: 45, rent: 12000, depositMonths: 3, transfer: 40000, decorPerSqm: 1800,
   equipment: 80000, stock: 30000, license: 5000, launch: 15000,
   staff: 2, salary: 5500, utility: 2500, otherFixed: 1200,
-  price: 26, daily: 110, gross: 0.62, days: 30, reserveMonths: 3,
+  revenueModel: "traffic", price: 26, daily: 110,
+  slotMinutes: 30, capacityUnits: 4, openHours: 12, utilization: 0.4,
+  gross: 0.62, days: 30, reserveMonths: 3,
 };
 
 /** 线上店铺默认参数 */
@@ -25,16 +27,26 @@ export const DEFAULT_ONLINE = {
 };
 
 export function calcOffline(p) {
+  const booking = p.revenueModel === "booking";
   const decor = p.area * p.decorPerSqm;
   const depositAmt = p.rent * p.depositMonths;
   const oneTime = p.transfer + depositAmt + decor + p.equipment + p.stock + p.license + p.launch;
   const fixed = p.rent + p.staff * p.salary + p.utility + p.otherFixed;
   const reserve = fixed * p.reserveMonths;
   const startup = oneTime + reserve;
-  const revenue = p.daily * p.price * p.days;
+  const slotMinutes = Math.max(1, Number(p.slotMinutes) || 60);
+  const capacityUnits = Math.max(1, Number(p.capacityUnits) || 1);
+  const openHours = Math.max(0, Number(p.openHours) || 0);
+  const utilization = Math.min(1, Math.max(0, Number(p.utilization) || 0));
+  const dailyCapacitySlots = booking ? (openHours * 60 / slotMinutes) * capacityUnits : 0;
+  const dailyBookedSlots = booking ? dailyCapacitySlots * utilization : 0;
+  const dailyVolume = booking ? dailyBookedSlots : p.daily;
+  const revenue = dailyVolume * p.price * p.days;
   const net = revenue * p.gross - fixed;
   const beRevenue = p.gross > 0 ? fixed / p.gross : Infinity;
-  const beDaily = isFinite(beRevenue) ? beRevenue / p.days / p.price : Infinity;
+  const beDaily = isFinite(beRevenue) && p.days > 0 && p.price > 0
+    ? beRevenue / p.days / p.price : Infinity;
+  const beUtilization = booking && dailyCapacitySlots > 0 ? beDaily / dailyCapacitySlots : Infinity;
   const payback = net > 0 ? oneTime / net : null;
   let cum = -startup;
   const flow = RAMP.map((r, i) => {
@@ -47,6 +59,9 @@ export function calcOffline(p) {
   return {
     kind: "offline", decor, depositAmt, oneTime, fixed, reserve, startup,
     revenue, net, beRevenue, beDaily, payback, flow,
+    revenueModel: booking ? "booking" : "traffic",
+    dailyCapacitySlots, dailyBookedSlots, monthlyBookedSlots: dailyBookedSlots * p.days,
+    beUtilization, hourlyRate: booking ? p.price * 60 / slotMinutes : 0,
     breakMonth: breakMonth >= 0 ? breakMonth + 1 : null,
     sqmDay: revenue / p.days / p.area,
     items: [

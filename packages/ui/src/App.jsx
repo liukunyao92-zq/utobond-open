@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Store, Globe, MapPin, Calculator, Bot, CreditCard, Sparkles, TrendingUp,
-  Users, Building2, Check, X, Lock, ChevronRight, AlertTriangle, Lightbulb,
+  Users, Building2, Check, X, Lock, ChevronRight, ChevronDown, AlertTriangle, Lightbulb,
   Plus, Send, Crown, Target, Clock, Loader2, ArrowRight, ShieldAlert,
   CheckCircle2, Circle, LayoutGrid, Ruler, Receipt, Wallet, ShieldCheck, Flame,
   Radar as RadarIcon, Gauge, Search, HandHelping, Server, Activity, UserRound,
   BadgePercent, Eye, MousePointerClick, ShoppingCart, PackageCheck, Wrench,
-  Megaphone, Headset, Star, Database
+  Megaphone, Headset, Star, Database, FolderKanban
 } from "lucide-react";
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -129,6 +129,30 @@ const CSS = `
 .sp-proj{display:flex;align-items:center;gap:10px;padding:10px 0}
 .sp-proj-name{font-weight:700;font-size:15px;letter-spacing:.01em}
 .sp-proj-meta{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.sp-project-picker{position:relative;min-width:0}
+.sp-project-trigger{
+  border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;
+  display:flex;align-items:center;gap:9px;cursor:pointer;color:var(--ink);min-width:0;text-align:left;
+}
+.sp-project-trigger:hover,.sp-project-trigger.open{background:var(--paper);border-color:var(--line2)}
+.sp-project-trigger-text{display:flex;flex-direction:column;gap:1px;min-width:0}
+.sp-project-trigger .sp-proj-name,.sp-project-trigger .sp-proj-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:270px}
+.sp-project-menu{
+  position:absolute;top:calc(100% + 5px);left:0;width:350px;z-index:50;padding:8px;
+  background:#fff;border:1px solid var(--line2);border-radius:10px;box-shadow:0 14px 36px rgba(22,35,43,.16);
+}
+.sp-project-menu-title{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;color:var(--muted);padding:4px 7px 7px}
+.sp-project-option{
+  width:100%;border:0;background:transparent;border-radius:7px;padding:9px;cursor:pointer;
+  display:flex;align-items:center;gap:10px;text-align:left;color:var(--ink);
+}
+.sp-project-option:hover{background:var(--paper)}
+.sp-project-option.on{background:var(--brand-soft)}
+.sp-project-option-info{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}
+.sp-project-option-name{font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sp-project-option-meta{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sp-project-add{border-top:1px solid var(--line);margin-top:6px;padding-top:6px}
+.sp-project-add .sp-project-option{color:var(--brand);font-weight:650}
 .sp-seg{display:flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden;background:#F5F7F6}
 .sp-seg button{
   border:0;background:transparent;padding:6px 13px;font-size:12.5px;cursor:pointer;
@@ -410,6 +434,8 @@ const CSS = `
   .gside,.gform,.g4,.g3,.g2{grid-template-columns:minmax(0,1fr)}
   .sp-body{padding:14px}
   .sp-chat{height:auto;min-height:480px}
+  .sp-project-trigger .sp-proj-meta{display:none}
+  .sp-project-menu{position:fixed;top:66px;left:12px;right:12px;width:auto}
 }
 @media (prefers-reduced-motion:reduce){
   .sp *{transition:none!important;animation:none!important}
@@ -465,6 +491,46 @@ function validStore(s) {
   if (!s || typeof s !== "object") return null;
   if (!s.info?.name || !Array.isArray(s.groups)) return null;
   return { tips: [], source: "tpl", done: {}, opened: false, ...s };
+}
+
+function newProjectId() {
+  return `project-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function validProject(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const store = validStore(raw.store);
+  if (!store) return null;
+  const mode = raw.mode === "online" ? "online" : "offline";
+  return {
+    id: String(raw.id || newProjectId()),
+    mode,
+    store,
+    budget: {
+      ...(mode === "online" ? DEFAULT_ONLINE : DEFAULT_OFFLINE),
+      ...(raw.budget && typeof raw.budget === "object" ? raw.budget : {}),
+    },
+    sites: Array.isArray(raw.sites) ? raw.sites : [],
+    chat: Array.isArray(raw.chat) ? raw.chat : null,
+    createdAt: raw.createdAt || new Date().toISOString(),
+    updatedAt: raw.updatedAt || raw.createdAt || new Date().toISOString(),
+  };
+}
+
+/** v1 快照每条主线只有一个店铺；读入时透明升级为项目数组。 */
+function projectsFromSnapshot(snapshot) {
+  if (Array.isArray(snapshot?.projects)) return snapshot.projects.map(validProject).filter(Boolean);
+  const projects = [];
+  for (const mode of ["offline", "online"]) {
+    const store = validStore(snapshot?.stores?.[mode]);
+    if (!store) continue;
+    projects.push(validProject({
+      id: `legacy-${mode}`, mode, store,
+      budget: snapshot?.[mode === "online" ? "on" : "off"],
+      sites: snapshot?.sitesAll?.[mode], chat: snapshot?.chats?.[mode],
+    }));
+  }
+  return projects.filter(Boolean);
 }
 
 /* ---------------- 通用组件 ---------------- */
@@ -667,6 +733,7 @@ function Funnel({ steps }) {
 function Overview({ go }) {
   const { mode, calc, riskInfo, accent, store, setStore, off, on } = useApp();
   const online = mode === "online";
+  const booking = !online && off.revenueModel === "booking";
   const total = store.groups.reduce((a, g) => a + g.items.length, 0);
   const doneN = store.groups.reduce((a, g, gi) => a + g.items.filter((_, ii) => store.done[`${gi}-${ii}`]).length, 0);
   const prog = total ? doneN / total : 0;
@@ -711,7 +778,11 @@ function Overview({ go }) {
         <Stat tone="t-brand" icon={Wallet} label="启动资金需求" value={wan(calc.startup)} unit="万"
           sub={`一次性 ${wan(calc.oneTime)}万 + 备用金 ${wan(calc.reserve)}万`} />
         <Stat tone="t-seal" icon={Target} label={online ? "保本月 GMV" : "保本月营业额"} value={wan(calc.beRevenue)} unit="万"
-          sub={online ? `约 ${Math.round(calc.beOrders)} 单/月` : `日均 ${Math.round(calc.beDaily)} 人`} />
+          sub={online
+            ? `约 ${Math.round(calc.beOrders)} 单/月`
+            : booking
+              ? `保本利用率 ${isFinite(calc.beUtilization) ? pct(calc.beUtilization) + "%" : "—"}`
+              : `日均 ${Math.round(calc.beDaily)} 人`} />
         <Stat tone={calc.net > 0 ? "t-profit" : "t-seal"} icon={TrendingUp} label="满产月净利"
           value={yuan(calc.net)} unit="元" sub={calc.net > 0 ? "按当前假设满产测算" : "当前假设下亏损"} />
         <Stat tone="t-amber" icon={ShieldAlert} label="风险健康分"
@@ -797,7 +868,9 @@ function Overview({ go }) {
               <Lightbulb size={15} color={C.amber} />
               <div>{online
                 ? `推广费占预估 GMV 的 ${pct(on.adSpend / calc.validGmv)}%。先把自然流量的转化率从 ${pct(on.cvr)}% 拉到 3%,再加投,同样的钱能多带三成单。`
-                : `保本需要日均 ${Math.round(calc.beDaily)} 人到店,你填的假设是 ${off.daily} 人,${off.daily >= calc.beDaily ? `富余 ${off.daily - Math.round(calc.beDaily)} 人,但爬坡期通常只有六成` : `还差 ${Math.round(calc.beDaily) - off.daily} 人`}。先把工作日午市的到店率打上去。`}</div>
+                : booking
+                  ? `每天可售约 ${Math.round(calc.dailyCapacitySlots)} 个时段，按 ${pct(off.utilization)}% 利用率预计预约 ${Math.round(calc.dailyBookedSlots)} 单。保本利用率是 ${isFinite(calc.beUtilization) ? pct(calc.beUtilization) + "%" : "—"}，先分别验证工作日和周末的预约率。`
+                  : `保本需要日均 ${Math.round(calc.beDaily)} 人到店,你填的假设是 ${off.daily} 人,${off.daily >= calc.beDaily ? `富余 ${off.daily - Math.round(calc.beDaily)} 人,但爬坡期通常只有六成` : `还差 ${Math.round(calc.beDaily) - off.daily} 人`}。先把工作日午市的到店率打上去。`}</div>
             </div>
             {riskInfo.risks.filter((r) => r.level === "高").slice(0, 1).map((r, i) => (
               <div key={i} className="sp-note risk" style={{ marginTop: 9 }}>
@@ -822,18 +895,60 @@ const ONLINE_FORM = {
   supply: "自有工厂", price: 89, budget: 15, content: "能拍短视频", audience: "25-35 岁一线城市女性",
 };
 
+function projectSiteForm(mode, store, budget) {
+  const info = store?.info || {};
+  if (mode === "online") return {
+    ...ONLINE_FORM,
+    name: `${info.category || "当前品类"} · ${info.platform || "待选平台"}`,
+    supply: info.supply || ONLINE_FORM.supply,
+    price: budget.price,
+    budget: Number(info.cap) || ONLINE_FORM.budget,
+    content: info.content || ONLINE_FORM.content,
+    audience: `${info.category || "当前品类"}的核心目标用户`,
+  };
+  const pricing = budget.revenueModel === "booking"
+    ? `预约制，每${budget.slotMinutes}分钟${budget.price}元，${budget.capacityUnits}个可预约资源`
+    : `客单价${budget.price}元，日均付费客流${budget.daily}人`;
+  return {
+    ...SITE_FORM,
+    name: `${info.city || "当前城市"} · ${info.category || "候选点位"}`,
+    circle: info.circle || SITE_FORM.circle,
+    area: budget.area,
+    rent: budget.rent,
+    note: `核心业务：${info.core || "—"}；经营模型：${pricing}`,
+  };
+}
+
 function SiteFinder() {
-  const { mode, project, sites, setSites, plan, useAI, aiLeft, openPay, accent } = useApp();
+  const { mode, project, store, sites, setSites, off, setOff, on, calc, plan, useAI, aiLeft, openPay, accent } = useApp();
   const online = mode === "online";
-  const [form, setForm] = useState(online ? ONLINE_FORM : SITE_FORM);
-  const [sel, setSel] = useState(0);
+  const baseForm = projectSiteForm(mode, store, online ? on : off);
+  const linkedSiteIndex = Math.max(0, sites.findIndex((site) => site.adopted));
+  const [form, setForm] = useState(() => sites[linkedSiteIndex]?.form ? { ...baseForm, ...sites[linkedSiteIndex].form } : baseForm);
+  const [sel, setSel] = useState(linkedSiteIndex);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
   const cur = sites[sel];
   const limit = PLANS[plan].sites;
 
-  useEffect(() => { setForm(online ? ONLINE_FORM : SITE_FORM); setSel(0); setErr(""); }, [online]);
+  useEffect(() => {
+    const linked = projectSiteForm(mode, store, online ? on : off);
+    const index = Math.max(0, sites.findIndex((site) => site.adopted));
+    setForm(sites[index]?.form ? { ...linked, ...sites[index].form } : linked);
+    setSel(index); setErr("");
+  }, [mode, project.name]);
+
+  function selectSite(index) {
+    setSel(index);
+    setForm({ ...baseForm, ...(sites[index]?.form || {}) });
+  }
+
+  function adoptSiteBudget() {
+    if (online || !cur?.form) return;
+    setOff((budget) => ({ ...budget, area: Number(cur.form.area), rent: Number(cur.form.rent) }));
+    setSites((all) => all.map((site) => ({ ...site, adopted: site.id === cur.id })));
+  }
 
   async function run() {
     if (sites.length >= limit && !sites.find((s) => s.name === form.name)) {
@@ -845,12 +960,18 @@ function SiteFinder() {
     try {
       const sys = online
         ? "你是中国电商操盘手。只输出 JSON,不要任何解释或代码块标记。字段:score(0-100整数,综合开店可行性),verdict(一句话结论,30字内),dimensions(6项数组,每项{name,score,comment},name固定为:平台匹配、货源优势、内容门槛、竞争强度、获客成本、利润空间),primary(主攻平台名),secondary(辅攻平台名),strengths(2条,各25字内),risks(2条,各25字内),actions(3条冷启动动作,各30字内),costHint(预估单个获客成本区间,20字内)"
-        : "你是中国线下零售选址顾问。只输出 JSON,不要任何解释或代码块标记。字段:score(0-100整数),verdict(一句话结论,30字内),dimensions(6项数组,每项{name,score,comment},name固定为:人流量、客群匹配、竞争强度、租金性价比、门店可见度、配套证照),strengths(2条,各25字内),risks(2条,各25字内),actions(3条落地动作,各30字内),costHint(该点位合理租金区间与谈判要点,25字内)";
+        : "你是中国线下商业选址顾问，覆盖零售、餐饮、运动场馆和服务门店。必须根据项目的核心业务与收入模型判断，不能套用餐饮模板。只输出 JSON,不要任何解释或代码块标记。字段:score(0-100整数),verdict(一句话结论,30字内),dimensions(6项数组,每项{name,score,comment},name固定为:需求密度、客群匹配、竞争强度、租金性价比、交通可达、配套合规),strengths(2条,各25字内),risks(2条,各25字内),actions(3条落地动作,各30字内),costHint(该点位合理租金区间与谈判要点,25字内)";
+      const pricingContext = off.revenueModel === "booking"
+        ? `预约制:每${off.slotMinutes}分钟${off.price}元,${off.capacityUnits}个可预约资源,每日营业${off.openHours}小时,利用率假设${pct(off.utilization)}%,保本利用率${isFinite(calc.beUtilization) ? pct(calc.beUtilization) + "%" : "无法计算"}`
+        : `客单价${off.price}元,日均付费客流${off.daily}人,保本日客流${Math.round(calc.beDaily)}人`;
       const q = online
-        ? `品类:${project.category};方案:${form.name};货源:${form.supply};客单价:${form.price}元;启动预算:${form.budget}万;内容能力:${form.content};目标人群:${form.audience}`
-        : `城市:${project.city};品类:${project.category};点位:${form.name};商圈类型:${form.circle};面积:${form.area}㎡;月租:${form.rent}元;楼层:${form.floor};临街面:${form.frontage}米;周边同类竞品:${form.rivals}家;补充:${form.note}`;
+        ? `项目:${project.name};品类:${project.category};核心业务:${store.info.core};方案:${form.name};货源:${form.supply};客单价:${form.price}元;启动预算:${form.budget}万;内容能力:${form.content};目标人群:${form.audience};当前预算预计有效GMV:${yuan(calc.revenue)}元/月`
+        : `项目:${project.name};城市:${project.city};品类:${project.category};核心业务:${store.info.core};收入模型:${pricingContext};预算面积:${off.area}㎡;预算月租:${off.rent}元;候选点位:${form.name};商圈类型:${form.circle};实际面积:${form.area}㎡;实际月租:${form.rent}元;楼层:${form.floor};临街面:${form.frontage}米;周边同类竞品:${form.rivals}家;补充:${form.note}`;
       const rep = parseJSON(await callAI("site", [{ role: "user", content: q }], sys));
-      const item = { id: Date.now(), name: form.name, report: rep, form: { ...form } };
+      const item = {
+        id: Date.now(), name: form.name, report: rep, form: { ...form },
+        projectContext: { name: project.name, city: project.city, category: project.category, core: store.info.core },
+      };
       setSites((prev) => {
         const idx = prev.findIndex((s) => s.name === form.name);
         if (idx >= 0) { const c = [...prev]; c[idx] = item; setSel(idx); return c; }
@@ -867,8 +988,8 @@ function SiteFinder() {
         <div>
           <h2 className="sp-h1">{online ? "平台选择" : "选址分析"}<span className="sp-linechip">{online ? "线上主线" : "线下主线"}</span></h2>
           <p className="sp-sub">{online
-            ? "把货源和内容能力说清楚,AI 给出各平台匹配度和冷启动路径。"
-            : "填一个真实点位,AI 从人流、客群、竞争、租金六个维度打分。"}</p>
+            ? `基于「${project.name}」的品类、货源、客单价和预算评估平台匹配度。`
+            : `基于「${project.name}」的核心业务、收入模型和预算，从需求、客群、竞争、租金、交通与合规六个维度评估。`}</p>
         </div>
         <div className="sp-actions">
           <Tag>已保存 {sites.length} / {limit === Infinity ? "∞" : limit}</Tag>
@@ -878,6 +999,10 @@ function SiteFinder() {
 
       <div className="sp-grid gform">
         <Card title={online ? "方案信息" : "点位信息"} eyebrow="INPUT">
+          <div className="sp-note win" style={{ marginBottom: 13 }}>
+            <FolderKanban size={15} color={C.profit} />
+            <div>已关联「{project.name}」：{project.city} · {project.category} · {store.info.core}</div>
+          </div>
           <Field label={online ? "方案名称" : "点位名称"}>
             <input className="sp-input" value={form.name} onChange={(e) => set("name")(e.target.value)} />
           </Field>
@@ -936,9 +1061,10 @@ function SiteFinder() {
           {sites.length > 1 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {sites.map((s, i) => (
-                <button key={s.id} className={`sp-item ${i === sel ? "on" : ""}`} style={{ width: "auto" }} onClick={() => setSel(i)}>
+                <button key={s.id} className={`sp-item ${i === sel ? "on" : ""}`} style={{ width: "auto" }} onClick={() => selectSite(i)}>
                   <div className="sp-idx">{String(i + 1).padStart(2, "0")}</div>
                   <div style={{ fontSize: 13 }}>{s.name}</div>
+                  {s.adopted && <Tag tone="brand">已采用</Tag>}
                   <b className="num" style={{ marginLeft: 8, color: s.report.score >= 75 ? C.profit : C.seal }}>{s.report.score}</b>
                 </button>
               ))}
@@ -950,7 +1076,14 @@ function SiteFinder() {
               desc={online ? "左边填完方案,点生成。AI 会比对六大平台的匹配度。" : "左边填完点位,点生成。几秒后拿到一份六维评分。"} /></Card>
           ) : (
             <>
-              <Card title={cur.name} eyebrow="报告" right={<Tag tone="dark">{new Date(cur.id).toLocaleDateString("zh-CN")}</Tag>}>
+              <Card title={cur.name} eyebrow="报告" right={<>
+                <Tag tone="dark">{new Date(cur.id).toLocaleDateString("zh-CN")}</Tag>
+                {!online && (
+                  <Btn size="sm" variant="ghost" onClick={adoptSiteBudget}>
+                    {cur.adopted && Number(off.area) === Number(cur.form?.area) && Number(off.rent) === Number(cur.form?.rent) ? "已采用并同步" : "采用此点位参数"}
+                  </Btn>
+                )}
+              </>}>
                 <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
                   <Dial score={cur.report.score} />
                   <div style={{ flex: 1, minWidth: 200 }}>
@@ -1027,8 +1160,9 @@ function SiteFinder() {
 
 /* ================= 前台:预算测算 ================= */
 function Budget() {
-  const { mode, off, setOff, on, setOn, calc, useAI, openPay, plan, accent } = useApp();
+  const { mode, off, setOff, on, setOn, calc, project, useAI, openPay, plan, accent } = useApp();
   const online = mode === "online";
+  const booking = !online && off.revenueModel === "booking";
   const p = online ? on : off;
   const setP = (k) => (v) => (online ? setOn : setOff)((s) => ({ ...s, [k]: v }));
   const [diag, setDiag] = useState(null);
@@ -1041,9 +1175,13 @@ function Budget() {
     setBusy(true);
     try {
       const sys = "你是中国小微创业财务顾问。只输出 JSON,不要解释或代码块标记。字段:verdict(整体判断,20字内),score(0-100,预算合理度),issues(3项数组,每项{item,level:高/中/低,comment(30字内)}),suggestions(3条,各30字内),cashTip(现金流提醒,35字内)";
-      const q = online
-        ? `线上店铺:客单价${p.price}元,日均访客${p.visitors},转化率${pct(p.cvr)}%,毛利率${pct(p.gross)}%,佣金${pct(p.commission)}%,单均物流${p.shipping}元,退货率${pct(p.returnRate)}%,月推广${yuan(p.adSpend)}元,人力${p.staff}人×${yuan(p.salary)}元。启动资金${wan(calc.startup)}万,保本GMV${wan(calc.beRevenue)}万/月,预估月净利${yuan(calc.net)}元。`
+      const projectContext = `当前项目:${project.name};城市:${project.city};品类:${project.category};`;
+      const offlineAssumptions = booking
+        ? `线下预约制场馆:${p.area}㎡,月租${yuan(p.rent)}元,每${p.slotMinutes}分钟${p.price}元,可预约场地或资源${p.capacityUnits}个,每日营业${p.openHours}小时,平均利用率${pct(p.utilization)}%,月营业${p.days}天,毛利率${pct(p.gross)}%。每天可售${Math.round(calc.dailyCapacitySlots)}个时段,预计月预约${Math.round(calc.monthlyBookedSlots)}单,保本利用率${isFinite(calc.beUtilization) ? pct(calc.beUtilization) + "%" : "无法计算"}。启动资金${wan(calc.startup)}万,保本月营业额${wan(calc.beRevenue)}万,预估月净利${yuan(calc.net)}元。`
         : `线下门店:${p.area}㎡,月租${yuan(p.rent)}元,装修${yuan(p.decorPerSqm)}元/㎡,设备${yuan(p.equipment)}元,客单价${p.price}元,日均客流${p.daily}人,毛利率${pct(p.gross)}%,${p.staff}人×${yuan(p.salary)}元。启动资金${wan(calc.startup)}万,保本月营业额${wan(calc.beRevenue)}万,预估月净利${yuan(calc.net)}元,回本${calc.payback ? calc.payback.toFixed(1) + "个月" : "无法回本"}。`;
+      const q = projectContext + (online
+        ? `线上店铺:客单价${p.price}元,日均访客${p.visitors},转化率${pct(p.cvr)}%,毛利率${pct(p.gross)}%,佣金${pct(p.commission)}%,单均物流${p.shipping}元,退货率${pct(p.returnRate)}%,月推广${yuan(p.adSpend)}元,人力${p.staff}人×${yuan(p.salary)}元。启动资金${wan(calc.startup)}万,保本GMV${wan(calc.beRevenue)}万/月,预估月净利${yuan(calc.net)}元。`
+        : offlineAssumptions);
       setDiag(parseJSON(await callAI("budgetAudit", [{ role: "user", content: q }], sys)));
     } catch { setDiag({ error: true }); } finally { setBusy(false); }
   }
@@ -1120,12 +1258,46 @@ function Budget() {
           </Card>
 
           <Card title="经营假设" eyebrow="ASSUMPTIONS">
-            <div className="sp-rowsplit">
-              <Field label="客单价"><NumIn value={p.price} onChange={setP("price")} unit="元" /></Field>
-              {online
-                ? <Field label="日均访客"><NumIn value={p.visitors} onChange={setP("visitors")} step={100} unit="人" /></Field>
-                : <Field label="日均客流"><NumIn value={p.daily} onChange={setP("daily")} unit="人" /></Field>}
-            </div>
+            {!online && (
+              <Field label="收入估算方式" hint="服务场馆建议选择按时段预约">
+                <div className="sp-seg" style={{ width: "100%" }}>
+                  <button type="button" style={{ flex: 1, justifyContent: "center" }}
+                    className={!booking ? "on" : ""} onClick={() => setP("revenueModel")("traffic")}>按客流 · 客单价</button>
+                  <button type="button" style={{ flex: 1, justifyContent: "center" }}
+                    className={booking ? "on" : ""} onClick={() => setP("revenueModel")("booking")}>按时段 · 预约计费</button>
+                </div>
+              </Field>
+            )}
+            {online || !booking ? (
+              <div className="sp-rowsplit">
+                <Field label="客单价"><NumIn value={p.price} onChange={setP("price")} unit="元" /></Field>
+                {online
+                  ? <Field label="日均访客"><NumIn value={p.visitors} onChange={setP("visitors")} step={100} unit="人" /></Field>
+                  : <Field label="日均付费客流"><NumIn value={p.daily} onChange={setP("daily")} unit="人" /></Field>}
+              </div>
+            ) : (
+              <>
+                <div className="sp-rowsplit">
+                  <Field label="每时段价格" hint={`折合 ${yuan(calc.hourlyRate)} 元/小时`}>
+                    <NumIn value={p.price} onChange={setP("price")} unit={`元/${p.slotMinutes}分钟`} />
+                  </Field>
+                  <Field label="单次预约时长"><NumIn value={p.slotMinutes} onChange={setP("slotMinutes")} step={15} min={15} max={240} unit="分钟" /></Field>
+                </div>
+                <div className="sp-rowsplit">
+                  <Field label="可预约场地 / 资源数" hint="如球场、教室或教练">
+                    <NumIn value={p.capacityUnits} onChange={setP("capacityUnits")} min={1} unit="个" />
+                  </Field>
+                  <Field label="每日营业时长"><NumIn value={p.openHours} onChange={setP("openHours")} step={0.5} min={0.5} max={24} unit="小时" /></Field>
+                </div>
+                <Field label="平均时段利用率" hint="已预约时段 ÷ 全部可售时段">
+                  <RateIn value={p.utilization} onChange={setP("utilization")} max={100} step={1} />
+                </Field>
+                <div className="sp-note win" style={{ marginBottom: 12 }}>
+                  <Clock size={15} color={C.profit} />
+                  <div>每天可售约 <b>{Math.round(calc.dailyCapacitySlots)}</b> 个时段；按当前利用率预计日均预约 <b>{Math.round(calc.dailyBookedSlots)}</b> 单、每月 <b>{Math.round(calc.monthlyBookedSlots)}</b> 单。</div>
+                </div>
+              </>
+            )}
             <Field label="毛利率"><RateIn value={p.gross} onChange={setP("gross")} max={95} /></Field>
             {online ? (
               <>
@@ -1155,10 +1327,10 @@ function Budget() {
             <BreakevenRuler current={calc.revenue} breakeven={calc.beRevenue}
               curLabel={online ? "预估有效 GMV" : "预估月营业额"} />
             <div className="sp-grid g3" style={{ marginTop: 14, gap: 10 }}>
-              <div><div className="sp-eyebrow">{online ? "保本单量" : "保本日客流"}</div>
+              <div><div className="sp-eyebrow">{online ? "保本单量" : booking ? "保本利用率" : "保本日客流"}</div>
                 <div className="num" style={{ fontSize: 17, fontWeight: 600, marginTop: 3 }}>
-                  {online ? Math.round(calc.beOrders) : Math.round(calc.beDaily)}
-                  <small style={{ fontSize: 11, color: C.muted, marginLeft: 3 }}>{online ? "单/月" : "人/天"}</small></div></div>
+                  {online ? Math.round(calc.beOrders) : booking ? (isFinite(calc.beUtilization) ? pct(calc.beUtilization) : "—") : Math.round(calc.beDaily)}
+                  <small style={{ fontSize: 11, color: C.muted, marginLeft: 3 }}>{online ? "单/月" : booking ? "%" : "人/天"}</small></div></div>
               <div><div className="sp-eyebrow">{online ? "推广 ROI" : "坪效"}</div>
                 <div className="num" style={{ fontSize: 17, fontWeight: 600, marginTop: 3 }}>
                   {online ? (isFinite(calc.roi) ? calc.roi.toFixed(2) : "—") : calc.sqmDay.toFixed(0)}
@@ -1388,7 +1560,7 @@ function OpsToolsOffline() {
     { t: "和房东谈第二年租金,提前 45 天开口", d: false },
   ]);
   const { diag, busy, run } = useOpsDiag(() =>
-    `线下门店,品类${store.info.category}。近30天累计营业额${yuan(sim.mtd)}元,保本线${yuan(calc.beRevenue)}元,达成率${pct(sim.hit)}%,到店${sim.traffic}人,30天里${sim.overDays}天过保本线。午市11-13点和晚市17-19点是双峰,下午14-16点客流只有峰值的27%。周末比工作日高约30%。`);
+    `当前项目:${store.info.name},城市${store.info.city},线下门店,品类${store.info.category}。近30天累计营业额${yuan(sim.mtd)}元,保本线${yuan(calc.beRevenue)}元,达成率${pct(sim.hit)}%,到店${sim.traffic}人,30天里${sim.overDays}天过保本线。午市11-13点和晚市17-19点是双峰,下午14-16点客流只有峰值的27%。周末比工作日高约30%。`);
   return (
     <div className="sp-page">
       <div className="sp-head">
@@ -1433,7 +1605,7 @@ function OpsToolsOnline() {
     { t: "ROI 低于 1.8 的投放计划先停掉", d: false },
   ]);
   const { diag, busy, run } = useOpsDiag(() =>
-    `线上店铺,品类${store.info.category}。近30天有效GMV ${yuan(sim.mtd)}元,保本线${yuan(calc.beRevenue)}元,达成率${pct(sim.hit)}%,${sim.overDays}天过线。进店→下单转化${pct(on.cvr)}%,退货率${pct(on.returnRate)}%。渠道:付费投流占46%,自然28%,达人16%,私域10%。投流ROI约${isFinite(calc.roi) ? calc.roi.toFixed(2) : "—"}。`);
+    `当前项目:${store.info.name},线上店铺,品类${store.info.category}。近30天有效GMV ${yuan(sim.mtd)}元,保本线${yuan(calc.beRevenue)}元,达成率${pct(sim.hit)}%,${sim.overDays}天过线。进店→下单转化${pct(on.cvr)}%,退货率${pct(on.returnRate)}%。渠道:付费投流占46%,自然28%,达人16%,私域10%。投流ROI约${isFinite(calc.roi) ? calc.roi.toFixed(2) : "—"}。`);
   return (
     <div className="sp-page">
       <div className="sp-head">
@@ -1580,9 +1752,14 @@ function ReportOnline() {
 
 /* ================= 前台:风险识别 ================= */
 function RiskPage() {
-  const { mode, riskInfo, calc, off, on, project, plan, useAI, openPay, accent } = useApp();
+  const { mode, riskInfo, calc, off, on, project, store, sites, plan, useAI, openPay, accent } = useApp();
   const online = mode === "online";
   const p = online ? on : off;
+  const totalTasks = store.groups.reduce((count, group) => count + group.items.length, 0);
+  const doneTasks = Object.values(store.done || {}).filter(Boolean).length;
+  const siteSummary = sites.length
+    ? sites.map((site) => `${site.name}:${site.report?.score ?? "未评分"}分`).join("、")
+    : online ? "尚无平台候选报告" : "尚无选址候选报告";
   const [scan, setScan] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => setScan(null), [online]);
@@ -1597,9 +1774,12 @@ function RiskPage() {
     try {
       const sys = "你是中国小微创业风控顾问。只输出 JSON,不要解释或代码块标记。字段:summary(总体风险判断,40字内),extra(2-3项数组,规则引擎容易漏掉的风险,每项{title(12字内),level:高/中/低,why(28字内),fix(30字内)}),watchlist(3条监测指标,每条含指标名和预警阈值,各25字内)";
       const known = risks.map((r) => r.title).join("、");
+      const offlineModel = p.revenueModel === "booking"
+        ? `预约制场馆,每${p.slotMinutes}分钟${p.price}元,${p.capacityUnits}个可预约资源,每日营业${p.openHours}小时,当前利用率${pct(p.utilization)}%,保本利用率${isFinite(calc.beUtilization) ? pct(calc.beUtilization) + "%" : "无法计算"}`
+        : `客单价${p.price}元,日均客流假设${p.daily}人`;
       const q = online
-        ? `线上店铺,品类${project.category}。客单价${p.price}元,转化率${pct(p.cvr)}%,退货率${pct(p.returnRate)}%,佣金${pct(p.commission)}%,月投流${yuan(p.adSpend)}元,备货${yuan(p.stock)}元,ROI${isFinite(calc.roi) ? calc.roi.toFixed(2) : "负"},月净利${yuan(calc.net)}元。规则引擎已识别:${known}。请补充它没覆盖的风险。`
-        : `线下门店,${project.city},品类${project.category}。${p.area}㎡,月租${yuan(p.rent)}元,转让费${yuan(p.transfer)}元,${p.staff}名员工,日均客流假设${p.daily}人,月净利${yuan(calc.net)}元,回本${calc.payback ? calc.payback.toFixed(1) + "个月" : "无法回本"}。规则引擎已识别:${known}。请补充它没覆盖的风险(如租约条款、证照时序、季节性等)。`;
+        ? `当前项目:${project.name},线上店铺,品类${project.category},核心业务:${store.info.core}。客单价${p.price}元,转化率${pct(p.cvr)}%,退货率${pct(p.returnRate)}%,佣金${pct(p.commission)}%,月投流${yuan(p.adSpend)}元,备货${yuan(p.stock)}元,ROI${isFinite(calc.roi) ? calc.roi.toFixed(2) : "负"},月净利${yuan(calc.net)}元。平台候选:${siteSummary};开店清单:${doneTasks}/${totalTasks}项完成。规则引擎已识别:${known}。请补充它没覆盖的风险。`
+        : `当前项目:${project.name},线下门店,${project.city},品类${project.category},核心业务:${store.info.core}。${p.area}㎡,月租${yuan(p.rent)}元,转让费${yuan(p.transfer)}元,${p.staff}名员工,${offlineModel},月净利${yuan(calc.net)}元,回本${calc.payback ? calc.payback.toFixed(1) + "个月" : "无法回本"}。选址候选:${siteSummary};开店清单:${doneTasks}/${totalTasks}项完成。规则引擎已识别:${known}。请结合该项目类型、选址报告和清单进度补充风险，不能套用餐饮模板。`;
       setScan(parseJSON(await callAI("riskScan", [{ role: "user", content: q }], sys)));
     } catch { setScan({ error: true }); } finally { setBusy(false); }
   }
@@ -1609,9 +1789,10 @@ function RiskPage() {
       <div className="sp-head">
         <div>
           <h2 className="sp-h1">风险识别<span className="sp-linechip">{online ? "线上主线" : "线下主线"}</span></h2>
-          <p className="sp-sub">规则引擎实时盯着你的每个数字;AI 深度扫描负责补规则看不到的盲区。</p>
+          <p className="sp-sub">当前项目：{project.name} · {project.category}。预算、{online ? "平台" : "选址"}报告和项目资料会一起参与判断。</p>
         </div>
         <div className="sp-actions">
+          <Tag>{online ? "平台" : "选址"}报告 {sites.length} 份</Tag>
           <Btn variant="pri" icon={busy ? Loader2 : RadarIcon} onClick={deepScan} disabled={busy}>
             {busy ? "扫描中…" : "AI 深度扫描"}{plan === "free" && <Lock size={12} />}
           </Btn>
@@ -1639,7 +1820,7 @@ function RiskPage() {
             <Tag tone="seal">{risks.filter((r) => r.level === "高").length} 项高危</Tag>
             <Tag tone="amber">{risks.filter((r) => r.level === "中").length} 项中危</Tag>
             <Tag>{risks.filter((r) => r.level === "低").length} 项提示</Tag>
-            <span style={{ fontSize: 12, color: C.muted, marginLeft: "auto" }}>改预算页的数字,这里实时重算</span>
+            <span style={{ fontSize: 12, color: C.muted, marginLeft: "auto" }}>项目、预算和{online ? "平台" : "选址"}报告实时联动</span>
           </div>
         </Card>
 
@@ -1676,7 +1857,7 @@ function RiskPage() {
       </div>
 
       <Card title={`规则引擎识别到 ${risks.length} 项风险`} eyebrow="RULE ENGINE"
-        right={<Tag tone="brand">实时联动预算数据</Tag>}>
+        right={<Tag tone="brand">项目数据实时联动</Tag>}>
         <div className="sp-grid g2">
           {risks.map((r, i) => (
             <div key={i} className={`sp-risk ${lvMap[r.level]}`}>
@@ -1694,7 +1875,7 @@ function RiskPage() {
   );
 }
 
-/* ================= 前台:AI 参谋(双主线独立)================= */
+/* ================= 前台:AI 参谋（每个项目独立）================= */
 const ADVISOR_META = {
   offline: {
     title: "线下开店参谋",
@@ -1711,22 +1892,19 @@ const ADVISOR_META = {
 };
 
 function Advisor() {
-  const { mode, calc, project, useAI, aiLeft, chats, setChats, accent } = useApp();
+  const { mode, calc, project, off, on, useAI, aiLeft, chat, setChat, accent } = useApp();
   const online = mode === "online";
   const meta = ADVISOR_META[mode];
-  const msgs = chats[mode] || [];
+  const msgs = chat || [];
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const boxRef = useRef(null);
 
   useEffect(() => {
-    if (!chats[mode]) {
-      setChats((c) => ({
-        ...c,
-        [mode]: [{ role: "assistant", content: `我是你的${meta.title}。${project.name} 的账我看过了:启动资金 ${wan(calc.startup)} 万,保本${online ? "月 GMV" : "月营业额"} ${wan(calc.beRevenue)} 万。\n\n想聊哪一块?左下角的工具箱里也有几件现成的活儿。` }],
-      }));
+    if (!chat) {
+      setChat([{ role: "assistant", content: `我是你的${meta.title}。${project.name} 的账我看过了:启动资金 ${wan(calc.startup)} 万,保本${online ? "月 GMV" : "月营业额"} ${wan(calc.beRevenue)} 万。\n\n想聊哪一块?左下角的工具箱里也有几件现成的活儿。` }]);
     }
-  }, [mode]);
+  }, [chat, setChat, meta.title, project.name, calc.startup, calc.beRevenue, online]);
   useEffect(() => { boxRef.current?.scrollTo({ top: 99999, behavior: "smooth" }); }, [msgs, busy]);
 
   async function send(q) {
@@ -1735,17 +1913,23 @@ function Advisor() {
     if (!useAI()) return;
     setText("");
     const next = [...msgs, { role: "user", content }];
-    setChats((c) => ({ ...c, [mode]: next }));
+    setChat(next);
     setBusy(true);
     try {
+      const pricingContext = online
+        ? `客单价${on.price}元,日均访客${on.visitors},转化率${pct(on.cvr)}%。`
+        : off.revenueModel === "booking"
+          ? `采用预约计费:每${off.slotMinutes}分钟${off.price}元,${off.capacityUnits}个可预约场地或资源,每日营业${off.openHours}小时,平均利用率${pct(off.utilization)}%,预计月预约${Math.round(calc.monthlyBookedSlots)}单,保本利用率${isFinite(calc.beUtilization) ? pct(calc.beUtilization) + "%" : "无法计算"}。`
+          : `客单价${off.price}元,日均付费客流${off.daily}人。`;
       const sys = `你是乌托帮里的「${meta.title}」,${meta.persona}。服务中国小微创业者,回答要具体、能落地、给数字,不说套话。控制在 250 字内,可用短列表。
 当前项目:${project.name},${online ? "线上店铺" : "线下实体店"},城市${project.city},品类${project.category}。
+收入模型:${pricingContext}
 关键数字:启动资金${wan(calc.startup)}万,月固定支出${yuan(calc.fixed)}元,保本${online ? "月GMV" : "月营业额"}${wan(calc.beRevenue)}万,预估月净利${yuan(calc.net)}元,回本${calc.payback ? calc.payback.toFixed(1) + "个月" : "当前假设下无法回本"}。
 回答时把这些数字用起来。`;
       const reply = await callAI("advisor", next.slice(-8).map((m) => ({ role: m.role, content: m.content })), sys);
-      setChats((c) => ({ ...c, [mode]: [...next, { role: "assistant", content: reply }] }));
+      setChat([...next, { role: "assistant", content: reply }]);
     } catch {
-      setChats((c) => ({ ...c, [mode]: [...next, { role: "assistant", content: "没连上 AI。检查网络后再发一次。" }] }));
+      setChat([...next, { role: "assistant", content: "没连上 AI。检查网络后再发一次。" }]);
     } finally { setBusy(false); }
   }
 
@@ -1754,7 +1938,7 @@ function Advisor() {
       <div className="sp-head">
         <div>
           <h2 className="sp-h1">{meta.title}<span className="sp-linechip">{online ? "线上主线" : "线下主线"}</span></h2>
-          <p className="sp-sub">{meta.persona}。两条主线的对话各自独立,互不串台。</p>
+          <p className="sp-sub">{meta.persona}。每个开店项目的对话和经营上下文各自独立。</p>
         </div>
         <div className="sp-actions"><Tag tone="brand">剩余 {aiLeft === Infinity ? "∞" : aiLeft} 次</Tag></div>
       </div>
@@ -1801,7 +1985,7 @@ function Advisor() {
           ))}
           <div className="sp-note" style={{ marginTop: 6, fontSize: 12 }}>
             <Bot size={14} color={C.muted} />
-            <div>参谋记得这条主线里聊过的一切;切到另一条主线,是另一位参谋。</div>
+            <div>参谋记得当前项目里聊过的一切；切到另一家店，会使用那家店自己的对话与经营数据。</div>
           </div>
         </Card>
       </div>
@@ -2464,7 +2648,7 @@ function Marketing() {
     if (useAI()) {
       try {
         const sys = "你是中国零售营销操盘手。只输出 JSON,不要解释或代码块标记。字段:title(方案名,14字内),hook(核心主张,24字内),plays(3项数组,每项{n(玩法名,10字内),detail(执行细节含金额,40字内)}),channels(4项数组,每项[渠道名,预算占比数字]),kpi(2条预期效果,各22字内),warn(1条风险提醒,30字内)";
-        const q = `${online ? "线上店铺" : "线下门店"},品类${store.info.category},核心产品:${store.info.core},客单价${store.info.price}元。活动目标:${goal},预算${budget}元,时长${days}天。给出可直接执行的营销方案。`;
+        const q = `当前项目:${store.info.name},${online ? "线上店铺" : `线下门店,城市${store.info.city}`},品类${store.info.category},核心产品:${store.info.core},客单价${store.info.price}元。活动目标:${goal},预算${budget}元,时长${days}天。给出可直接执行的营销方案。`;
         const rep = parseJSON(await callAI("campaign", [{ role: "user", content: q }], sys));
         if (rep.plays?.length) result = { ...rep, source: "ai" };
       } catch { /* 落到模板 */ }
@@ -2670,27 +2854,35 @@ export default function UtobangApp({
   const [view, setView] = useState("front");
   const [tab, setTab] = useState("overview");
   const [adminTab, setAdminTab] = useState("dash");
-  const [mode, setMode] = useState("offline");
+  const [draftMode, setDraftMode] = useState("offline");
+  const [draftBudgets, setDraftBudgets] = useState({
+    offline: { ...DEFAULT_OFFLINE }, online: { ...DEFAULT_ONLINE },
+  });
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const projectPickerRef = useRef(null);
   const [localPlan, setLocalPlan] = useState("free");
   const [aiUsed, setAiUsed] = useState(0);
   const [payOpen, setPayOpen] = useState(false);
   const [payMsg, setPayMsg] = useState("");
   const [lockInfo, setLockInfo] = useState(null);
-  const [sitesAll, setSitesAll] = useState({ offline: [], online: [] });
-  const [chats, setChats] = useState({ offline: null, online: null });
-  const [stores, setStores] = useState({ offline: null, online: null });
+
+  useEffect(() => {
+    if (!projectMenuOpen) return undefined;
+    const close = (event) => {
+      if (!projectPickerRef.current?.contains(event.target)) setProjectMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [projectMenuOpen]);
 
   // 不计次的版本一律按最高档跑,页面里那些 plan === "free" 的门禁自然全开
   const plan = edition.metering ? (account?.plan || localPlan) : (edition.plan || "max");
   const setPlan = (p) => (onPlanChange ? onPlanChange(p) : setLocalPlan(p));
 
-  const [off, setOff] = useState(DEFAULT_OFFLINE);
-  const [on, setOn] = useState(DEFAULT_ONLINE);
-
   /**
-   * 数据持久化(可选)。
-   * 当前应用不传 persistence —— 数据只在内存里,关掉标签页就没了,这是刻意的:
-   * 零数据库、零运维、隐私最好。云端版传进来,业务数据落库,换设备也在。
+   * 数据持久化（可选）。v2 起每个开店项目拥有独立的店铺、预算、候选与 AI 对话。
    */
   const [hydrated, setHydrated] = useState(!persistence);
   useEffect(() => {
@@ -2699,18 +2891,13 @@ export default function UtobangApp({
     persistence.load()
       .then((snap) => {
         if (!alive || !snap) return;
-        // 快照可能来自旧版本或被改坏了,形状不对就当没有 —— 不能让用户卡在白屏上
-        if (snap.stores) setStores({
-          offline: validStore(snap.stores.offline),
-          online: validStore(snap.stores.online),
-        });
-        if (snap.sitesAll) setSitesAll({
-          offline: Array.isArray(snap.sitesAll.offline) ? snap.sitesAll.offline : [],
-          online: Array.isArray(snap.sitesAll.online) ? snap.sitesAll.online : [],
-        });
-        if (snap.chats) setChats({ offline: snap.chats.offline ?? null, online: snap.chats.online ?? null });
-        if (snap.off) setOff({ ...DEFAULT_OFFLINE, ...snap.off });
-        if (snap.on) setOn({ ...DEFAULT_ONLINE, ...snap.on });
+        const restored = projectsFromSnapshot(snap);
+        setProjects(restored);
+        const wanted = restored.some((item) => item.id === snap.activeProjectId)
+          ? snap.activeProjectId : restored[0]?.id || null;
+        setActiveProjectId(wanted);
+        const active = restored.find((item) => item.id === wanted);
+        if (active) setDraftMode(active.mode);
       })
       .catch(() => { /* 读不到就当新用户,不挡在门外 */ })
       .finally(() => alive && setHydrated(true));
@@ -2721,15 +2908,52 @@ export default function UtobangApp({
   useEffect(() => {
     if (!persistence || !hydrated) return;
     const t = setTimeout(() => {
-      persistence.save({ stores, sitesAll, chats, off, on }).catch(() => {});
+      persistence.save({ version: 2, projects, activeProjectId }).catch(() => {});
     }, 800);
     return () => clearTimeout(t);
-  }, [persistence, hydrated, stores, sitesAll, chats, off, on]);
+  }, [persistence, hydrated, projects, activeProjectId]);
 
-  const store = stores[mode];
-  const setStore = (patch) => setStores((all) => ({
-    ...all,
-    [mode]: { ...all[mode], ...(typeof patch === "function" ? patch(all[mode]) : patch) },
+  const activeProject = projects.find((item) => item.id === activeProjectId) || null;
+  const mode = activeProject?.mode || draftMode;
+  const store = activeProject?.store || null;
+  const off = mode === "offline" ? (activeProject?.budget || draftBudgets.offline) : DEFAULT_OFFLINE;
+  const on = mode === "online" ? (activeProject?.budget || draftBudgets.online) : DEFAULT_ONLINE;
+
+  const updateActiveProject = (updater) => setProjects((all) => all.map((item) => {
+    if (item.id !== activeProjectId) return item;
+    const updated = updater(item);
+    return { ...updated, updatedAt: new Date().toISOString() };
+  }));
+
+  const setStore = (patch) => updateActiveProject((item) => {
+    const delta = typeof patch === "function" ? patch(item.store) : patch;
+    return { ...item, store: { ...item.store, ...delta } };
+  });
+
+  function setBudget(targetMode, updater) {
+    if (activeProject && activeProject.mode === targetMode) {
+      updateActiveProject((item) => ({
+        ...item,
+        budget: typeof updater === "function" ? updater(item.budget) : updater,
+      }));
+      return;
+    }
+    setDraftBudgets((all) => ({
+      ...all,
+      [targetMode]: typeof updater === "function" ? updater(all[targetMode]) : updater,
+    }));
+  }
+  const setOff = (updater) => setBudget("offline", updater);
+  const setOn = (updater) => setBudget("online", updater);
+  const sites = activeProject?.sites || [];
+  const setSites = (updater) => updateActiveProject((item) => ({
+    ...item,
+    sites: typeof updater === "function" ? updater(item.sites) : updater,
+  }));
+  const chat = activeProject?.chat || null;
+  const setChat = (updater) => updateActiveProject((item) => ({
+    ...item,
+    chat: typeof updater === "function" ? updater(item.chat) : updater,
   }));
 
   const project = store
@@ -2739,7 +2963,12 @@ export default function UtobangApp({
       : { name: "未创建的线下店", city: "—", category: "—", stage: 0 });
 
   const calc = useMemo(() => (mode === "online" ? calcOnline(on) : calcOffline(off)), [mode, on, off]);
-  const riskInfo = useMemo(() => detectRisks(mode, mode === "online" ? on : off, calc), [mode, on, off, calc]);
+  const riskInfo = useMemo(() => detectRisks(
+    mode,
+    mode === "online" ? on : off,
+    calc,
+    { category: store?.info?.category, core: store?.info?.core, sites },
+  ), [mode, on, off, calc, store, sites]);
   const accent = ACCENTS[mode];
 
   const quota = edition.metering ? PLANS[plan].ai : Infinity;
@@ -2772,11 +3001,8 @@ export default function UtobangApp({
   const ctx = {
     edition, account, onSignOut, onCheckout,
     mode, plan, setPlan, aiUsed, aiLeft, useAI, openPay,
-    sites: sitesAll[mode],
-    setSites: (updater) => setSitesAll((all) => ({
-      ...all, [mode]: typeof updater === "function" ? updater(all[mode]) : updater,
-    })),
-    off, setOff, on, setOn, calc, project, riskInfo, accent, chats, setChats,
+    sites, setSites,
+    off, setOff, on, setOn, calc, project, riskInfo, accent, chat, setChat,
     store, setStore, nav: setTab,
   };
 
@@ -2818,18 +3044,28 @@ export default function UtobangApp({
    * 的内容跟主线绑定。托、自定义板块不显示切换。
    */
   const PREP_TABS = new Set(["overview", "checklist", "budget", "site", "risk", "advisor"]);
-  const showModeSeg = PREP_TABS.has(tab) || (!store && !STANDALONE.has(tab));
+  const showModeSeg = !store && (PREP_TABS.has(tab) || !STANDALONE.has(tab));
 
   let page;
   if (isAdmin) {
     page = adminTab === "dash" ? <AdminDash /> : adminTab === "users" ? <AdminUsers /> : <AdminAI />;
   } else if (!store && !STANDALONE.has(tab)) {
-    page = <Wizard mode={mode} setMode={setMode}
+    page = <Wizard mode={mode} setMode={setDraftMode}
       onDone={(info, planObj) => {
-        setStores((all) => ({
-          ...all,
-          [mode]: { info, groups: planObj.groups, tips: planObj.tips || [], source: planObj.source, done: {}, opened: false },
-        }));
+        const id = newProjectId();
+        const createdAt = new Date().toISOString();
+        const nextProject = {
+          id,
+          mode,
+          store: { info, groups: planObj.groups, tips: planObj.tips || [], source: planObj.source, done: {}, opened: false },
+          budget: { ...(mode === "online" ? on : off) },
+          sites: [],
+          chat: null,
+          createdAt,
+          updatedAt: createdAt,
+        };
+        setProjects((all) => [...all, nextProject]);
+        setActiveProjectId(id);
         setTab("checklist");
       }} />;
   } else {
@@ -2865,6 +3101,25 @@ export default function UtobangApp({
         btn: "去开店清单", to: "checklist",
       });
     }
+  }
+
+  function selectProject(id) {
+    const item = projects.find((candidate) => candidate.id === id);
+    if (!item) return;
+    setActiveProjectId(id);
+    setDraftMode(item.mode);
+    setProjectMenuOpen(false);
+    if (STANDALONE.has(tab)) setTab("overview");
+  }
+
+  function startNewProject() {
+    setActiveProjectId(null);
+    setDraftBudgets({
+      offline: { ...DEFAULT_OFFLINE },
+      online: { ...DEFAULT_ONLINE },
+    });
+    setProjectMenuOpen(false);
+    setTab("overview");
   }
 
   return (
@@ -2980,20 +3235,67 @@ export default function UtobangApp({
               </>
             ) : (
               <>
-                <div className="sp-proj">
-                  {mode === "online" ? <Globe size={16} color={accent.main} /> : <Store size={16} color={accent.main} />}
-                  <span className="sp-proj-name">{store ? store.info.name : "开店设置"}</span>
-                  <span className="sp-proj-meta">
-                    {store ? `${project.city} · ${project.category}` : "三步创建你的店"}
-                  </span>
-                  {store && <Tag tone={opened ? "profit" : "amber"}>{opened ? "营业中" : "筹备中"}</Tag>}
+                <div className="sp-project-picker" ref={projectPickerRef}>
+                  <button
+                    type="button"
+                    className={`sp-project-trigger ${projectMenuOpen ? "open" : ""}`}
+                    onClick={() => setProjectMenuOpen((open) => !open)}
+                    aria-expanded={projectMenuOpen}
+                    aria-haspopup="listbox"
+                  >
+                    {store
+                      ? (mode === "online" ? <Globe size={17} color={accent.main} /> : <Store size={17} color={accent.main} />)
+                      : <FolderKanban size={17} color={accent.main} />}
+                    <span className="sp-project-trigger-text">
+                      <span className="sp-proj-name">{store ? store.info.name : "新建开店项目"}</span>
+                      <span className="sp-proj-meta">
+                        {store ? `${project.city} · ${project.category}` : (projects.length ? "选择主线并创建新店" : "创建你的第一个店铺项目")}
+                      </span>
+                    </span>
+                    {store && <Tag tone={opened ? "profit" : "amber"}>{opened ? "营业中" : "筹备中"}</Tag>}
+                    <ChevronDown size={14} color={C.muted} />
+                  </button>
+                  {projectMenuOpen && (
+                    <div className="sp-project-menu" role="listbox" aria-label="开店项目">
+                      <div className="sp-project-menu-title">开店项目 · {projects.length}</div>
+                      {projects.map((item) => {
+                        const itemOnline = item.mode === "online";
+                        const itemInfo = item.store.info;
+                        return (
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={item.id === activeProjectId}
+                            key={item.id}
+                            className={`sp-project-option ${item.id === activeProjectId ? "on" : ""}`}
+                            onClick={() => selectProject(item.id)}
+                          >
+                            {itemOnline ? <Globe size={16} /> : <Store size={16} />}
+                            <span className="sp-project-option-info">
+                              <span className="sp-project-option-name">{itemInfo.name}</span>
+                              <span className="sp-project-option-meta">
+                                {itemOnline ? "线上店铺" : "线下实体店"} · {itemInfo.city || "全国"} · {itemInfo.category}
+                              </span>
+                            </span>
+                            <Tag tone={item.store.opened ? "profit" : "amber"}>{item.store.opened ? "营业中" : "筹备中"}</Tag>
+                            {item.id === activeProjectId && <Check size={14} color="var(--brand)" />}
+                          </button>
+                        );
+                      })}
+                      <div className="sp-project-add">
+                        <button type="button" className="sp-project-option" onClick={startNewProject}>
+                          <Plus size={16} />新增开店项目
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {showModeSeg && (
                   <div className="sp-seg">
-                    <button className={mode === "offline" ? "on" : ""} onClick={() => setMode("offline")}>
+                    <button className={mode === "offline" ? "on" : ""} onClick={() => setDraftMode("offline")}>
                       <Store size={13} />线下实体店
                     </button>
-                    <button className={mode === "online" ? "on" : ""} onClick={() => setMode("online")}>
+                    <button className={mode === "online" ? "on" : ""} onClick={() => setDraftMode("online")}>
                       <Globe size={13} />线上店铺
                     </button>
                   </div>
@@ -3008,7 +3310,9 @@ export default function UtobangApp({
               </>
             )}
           </div>
-          <div className="sp-body">{page}</div>
+          <div className="sp-body">
+            <React.Fragment key={`${activeProjectId || "new"}:${tab}`}>{page}</React.Fragment>
+          </div>
         </div>
 
         <Modal open={payOpen} onClose={() => setPayOpen(false)} title="需要更高的方案" icon={Lock} width={430}>
