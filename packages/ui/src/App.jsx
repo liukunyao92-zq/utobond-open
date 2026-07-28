@@ -6,7 +6,7 @@ import {
   CheckCircle2, Circle, LayoutGrid, Ruler, Receipt, Wallet, ShieldCheck, Flame,
   Radar as RadarIcon, Gauge, Search, HandHelping, Server, Activity, UserRound,
   BadgePercent, Eye, MousePointerClick, ShoppingCart, PackageCheck, Wrench,
-  Megaphone, Headset, Star
+  Megaphone, Headset, Star, Database
 } from "lucide-react";
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -22,6 +22,7 @@ import {
 } from "@utobond/core";
 import { LOCAL_EDITION } from "./editions.js";
 import { LLMSettings } from "./LLMSettings.jsx";
+import { StorageSettings } from "./StorageSettings.jsx";
 
 /* ============================================================
    乌托帮 UTOBANG — 先帮后托的开店服务台
@@ -2796,10 +2797,11 @@ export default function UtobangApp({
     { k: "marketing", label: "营销活动", icon: Megaphone, ai: true },
     ...(edition.hosting ? [{ k: "hosting", label: "托管服务", icon: Headset }] : []),
   ] : [];
-  /** 「自定义」板块根据 edition 装配订阅账单或模型设置 */
+  /** 「自定义」板块根据 edition 装配订阅账单、模型与数据存储设置 */
   const NAV_COMMON = [
     ...(edition.billing ? [{ k: "billing", label: "订阅与账单", icon: Receipt }] : []),
     ...(edition.settings ? [{ k: "settings", label: "模型设置", icon: Wrench }] : []),
+    ...(edition.storage ? [{ k: "storage", label: "数据存储", icon: Database }] : []),
   ];
   const ADMIN_NAV = [
     { k: "dash", label: "平台看板", icon: TrendingUp },
@@ -2810,7 +2812,7 @@ export default function UtobangApp({
   const isAdmin = edition.admin && view === "admin";
   const opened = !!store?.opened;
   /** 这些页面不依赖店铺,未建店也能直接进 */
-  const STANDALONE = new Set(["billing", "settings", "hosting"]);
+  const STANDALONE = new Set(["billing", "settings", "storage", "hosting"]);
   /**
    * 线上/线下主线切换只属于「帮」板块 —— 只有这些页面(和未建店的向导)
    * 的内容跟主线绑定。托、自定义板块不显示切换。
@@ -2842,6 +2844,7 @@ export default function UtobangApp({
       : tab === "risk" ? <RiskPage />
       : tab === "advisor" ? <Advisor />
       : tab === "settings" ? <LLMSettings apiFetch={apiFetch} />
+      : tab === "storage" ? <StorageSettings apiFetch={apiFetch} />
       : extraPages[tab] ? extraPages[tab]()
       : edition.billing ? <Billing />
       : <Overview go={setTab} />;

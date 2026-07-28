@@ -15,6 +15,7 @@ export const LOCAL_EDITION = {
   ops: false,        // 无「托」板块(日常运营/数据报表/营销活动/托管服务)
   hosting: false,    // 真人托管是扩展服务,当前项目不含
   settings: true,    // 「自定义」板块:模型设置页
+  storage: true,     // 「自定义」板块:SQLite / MySQL 数据存储配置
   auth: false,       // 不需要登录
   /** 所有原本按档位上锁的能力一律放行 */
   plan: "max",
@@ -31,6 +32,7 @@ export const CLOUD_EDITION = {
   ops: true,
   hosting: true,
   settings: false,   // 平台 Key 绝不暴露给用户
+  storage: false,    // 云端存储由平台统一管理
   auth: true,
   plan: null,        // 由服务端下发
   showPlanTag: true,

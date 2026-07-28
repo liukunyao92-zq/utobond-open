@@ -1,11 +1,11 @@
 """乌托帮后端(Python / FastAPI)。
 
-职责只有两件:
+职责:
   1. 转发 AI 请求 —— Key 留在服务端,前端永远拿不到
   2. 读写模型配置 —— 让用户在网页上换供应商,不用重启
+  3. 持久化业务快照 —— 默认 SQLite,也可切换到 MySQL
 
-没有用户、没有数据库、没有计费。数据都在浏览器里,关掉标签页就没了 ——
-这是当前项目的取舍:零数据库、低运维、业务数据默认留在浏览器内存。
+没有账号和计费；业务数据保存在部署者自己的数据库中。
 
 启动:
   uvicorn main:app --port 8787
@@ -26,9 +26,16 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from starlette.concurrency import run_in_threadpool  # noqa: E402
 
 import llm_client  # noqa: E402
-from config import (ConfigLockedError, describe_config, is_locked,  # noqa: E402
-                    load_config, save_config)
+import storage as storage_backend  # noqa: E402
+from config import (ConfigLockedError, ConfigNotFoundError, activate_config,  # noqa: E402
+                    create_config, delete_config, describe_config,
+                    describe_configs, get_config, is_locked, load_config,
+                    save_config, update_config)
 from presets import PRESET_LIST, is_configured  # noqa: E402
+from storage_config import (StorageConfigError, StorageConfigLockedError,  # noqa: E402
+                            build_storage_config, describe_storage_config,
+                            is_locked as is_storage_locked, load_storage_config,
+                            save_storage_config)
 
 MAX_TOKENS_CAP = 4000
 
@@ -46,7 +53,7 @@ ALLOWED_ORIGINS = _allowed_origins()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -128,6 +135,7 @@ def health():
         "provider": cfg["provider"] or None,
         "model": cfg["model"] or None,
         "configSource": cfg["source"],
+        "storage": load_storage_config()["driver"],
     }
 
 
@@ -169,17 +177,18 @@ async def ai_stream(request: Request):
 
 @app.get("/api/settings/llm")
 def settings_get():
-    return {"config": describe_config(), "presets": PRESET_LIST}
+    return {**describe_configs(), "presets": PRESET_LIST}
 
 
 @app.put("/api/settings/llm")
 async def settings_put(request: Request):
+    """兼容旧客户端：更新当前启用的配置。"""
     try:
         patch = await request.json()
         if not isinstance(patch, dict):
             raise llm_client.AIError("请求体必须是 JSON 对象", status=400, code="BAD_REQUEST")
         save_config(patch)
-        return {"config": describe_config()}
+        return describe_configs()
     except ConfigLockedError as e:
         return JSONResponse({"error": str(e)}, status_code=403)
     except (TypeError, ValueError):
@@ -188,18 +197,76 @@ async def settings_put(request: Request):
         return _err(e)
 
 
+def _settings_error(error):
+    if isinstance(error, ConfigLockedError):
+        return JSONResponse({"error": str(error)}, status_code=403)
+    return JSONResponse({"error": str(error), "code": "CONFIG_NOT_FOUND"}, status_code=404)
+
+
+@app.post("/api/settings/llm/configs")
+async def settings_create(request: Request):
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise llm_client.AIError("请求体必须是 JSON 对象", status=400, code="BAD_REQUEST")
+        saved = create_config(body)
+        return {**describe_configs(), "savedId": saved["id"]}
+    except (ConfigLockedError, ConfigNotFoundError) as e:
+        return _settings_error(e)
+    except (TypeError, ValueError):
+        return _err(llm_client.AIError("请求体必须是 JSON", status=400, code="BAD_REQUEST"))
+    except llm_client.AIError as e:
+        return _err(e)
+
+
+@app.put("/api/settings/llm/configs/{config_id}")
+async def settings_update(config_id: str, request: Request):
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise llm_client.AIError("请求体必须是 JSON 对象", status=400, code="BAD_REQUEST")
+        update_config(config_id, body)
+        return {**describe_configs(), "savedId": config_id}
+    except (ConfigLockedError, ConfigNotFoundError) as e:
+        return _settings_error(e)
+    except (TypeError, ValueError):
+        return _err(llm_client.AIError("请求体必须是 JSON", status=400, code="BAD_REQUEST"))
+    except llm_client.AIError as e:
+        return _err(e)
+
+
+@app.post("/api/settings/llm/configs/{config_id}/activate")
+def settings_activate(config_id: str):
+    try:
+        activate_config(config_id)
+        return describe_configs()
+    except (ConfigLockedError, ConfigNotFoundError) as e:
+        return _settings_error(e)
+
+
+@app.delete("/api/settings/llm/configs/{config_id}")
+def settings_delete(config_id: str):
+    try:
+        delete_config(config_id)
+        return describe_configs()
+    except (ConfigLockedError, ConfigNotFoundError) as e:
+        return _settings_error(e)
+
+
 @app.post("/api/settings/llm/test")
 async def settings_test(request: Request):
-    """支持「先测再存」:body 里给的字段覆盖已存配置,key 留空则沿用已存的"""
+    """支持先测再存；Key 留空时只沿用当前编辑记录自己的已存 Key。"""
     if is_locked():
         return JSONResponse({"error": "模型配置已锁定，测试连接也只允许部署方执行。"}, status_code=403)
-    stored = load_config()
     try:
         patch = await request.json() or {}
     except (TypeError, ValueError):
         return _err(llm_client.AIError("请求体必须是 JSON", status=400, code="BAD_REQUEST"))
     if not isinstance(patch, dict):
         return _err(llm_client.AIError("请求体必须是 JSON 对象", status=400, code="BAD_REQUEST"))
+    # configId=null 代表正在新增，不能借用当前启用项的 Key。
+    stored = get_config(patch.get("configId")) if "configId" in patch else load_config()
+    stored = stored or {}
     provider = patch.get("provider") or stored.get("provider")
     base_url = patch.get("baseURL") or stored.get("baseURL")
     identity_changed = (
@@ -221,6 +288,93 @@ async def settings_test(request: Request):
     return await run_in_threadpool(llm_client.test_connection, merged)
 
 
+# ---- 数据存储 API：默认 SQLite，可切换 MySQL ----
+
+def _storage_error(error, status=503):
+    return JSONResponse({"error": str(error), "code": "STORAGE_ERROR"}, status_code=status)
+
+
+@app.get("/api/settings/storage")
+def storage_settings_get():
+    return {"config": describe_storage_config()}
+
+
+@app.post("/api/settings/storage/test")
+async def storage_settings_test(request: Request):
+    try:
+        if is_storage_locked():
+            raise StorageConfigLockedError(
+                "数据存储配置已锁定，测试连接也只允许部署方执行。")
+        patch = await request.json()
+        if not isinstance(patch, dict):
+            raise StorageConfigError("请求体必须是 JSON 对象。")
+        candidate = build_storage_config(patch)
+        return await run_in_threadpool(storage_backend.test_connection, candidate)
+    except StorageConfigLockedError as e:
+        return _storage_error(e, 403)
+    except (TypeError, ValueError, StorageConfigError) as e:
+        return _storage_error(e, 400)
+    except storage_backend.StorageError as e:
+        return _storage_error(e)
+
+
+@app.put("/api/settings/storage")
+async def storage_settings_put(request: Request):
+    """验证新连接后切换，并尽量把当前业务快照复制到新存储。"""
+    try:
+        if is_storage_locked():
+            raise StorageConfigLockedError(
+                "数据存储配置已被部署方锁定(STORAGE_CONFIG_LOCKED=1)，只能改环境变量。")
+        patch = await request.json()
+        if not isinstance(patch, dict):
+            raise StorageConfigError("请求体必须是 JSON 对象。")
+        candidate = build_storage_config(patch)
+        await run_in_threadpool(storage_backend.test_connection, candidate)
+
+        snapshot = None
+        migration_warning = ""
+        try:
+            snapshot = await run_in_threadpool(storage_backend.load_snapshot)
+        except storage_backend.StorageError as e:
+            migration_warning = f"旧存储读取失败，已仅切换配置：{e}"
+        if snapshot is not None:
+            await run_in_threadpool(storage_backend.save_snapshot, snapshot, candidate)
+        save_storage_config(candidate)
+        return {
+            "config": describe_storage_config(),
+            "migrated": snapshot is not None,
+            "warning": migration_warning or None,
+        }
+    except StorageConfigLockedError as e:
+        return _storage_error(e, 403)
+    except (TypeError, ValueError, StorageConfigError) as e:
+        return _storage_error(e, 400)
+    except storage_backend.StorageError as e:
+        return _storage_error(e)
+
+
+@app.get("/api/data/snapshot")
+def data_snapshot_get():
+    try:
+        return {"snapshot": storage_backend.load_snapshot()}
+    except storage_backend.StorageError as e:
+        return _storage_error(e)
+
+
+@app.put("/api/data/snapshot")
+async def data_snapshot_put(request: Request):
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("snapshot"), dict):
+            raise storage_backend.StorageError("snapshot 必须是 JSON 对象。")
+        await run_in_threadpool(storage_backend.save_snapshot, body["snapshot"])
+        return {"ok": True}
+    except (TypeError, ValueError):
+        return _storage_error("请求体必须是 JSON。", 400)
+    except storage_backend.StorageError as e:
+        return _storage_error(e, 400 if "必须" in str(e) or "超过" in str(e) else 503)
+
+
 # 构建过的前端直接托管,单进程部署
 _dist = Path(__file__).parent.parent / "web" / "dist"
 if _dist.is_dir():
@@ -231,6 +385,10 @@ def print_startup():
     cfg = describe_config()
     port = os.environ.get("PORT", "8787")
     print(f"[utobond] 后端已启动 → http://localhost:{port}")
+    storage_cfg = load_storage_config()
+    target = (storage_cfg.get("sqlitePath") if storage_cfg["driver"] == "sqlite"
+              else storage_cfg["mysql"]["host"])
+    print(f'[utobond] 数据存储:{storage_cfg["driver"]} / {target}')
     if is_configured(load_config()):
         src = "配置文件" if cfg["source"] == "file" else "环境变量"
         print(f'[utobond] 模型:{cfg["provider"]} / {cfg["model"]}(来自{src})')

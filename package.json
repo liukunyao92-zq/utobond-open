@@ -19,7 +19,7 @@
     "build": "npm run build --workspace apps/web",
     "start": "apps/server/.venv/bin/python apps/server/run.py",
     "test:core": "c8 --temp-directory=/tmp/utobond-open-c8 --reports-dir=/tmp/utobond-open-c8-report --check-coverage --lines 90 --branches 65 --functions 75 node --test packages/core/test/*.test.js",
-    "test:server": "COVERAGE_FILE=/tmp/utobond-open.coverage apps/server/.venv/bin/python -m pytest apps/server/tests -q -p no:cacheprovider --cov=config --cov=llm_client --cov=main --cov=presets --cov=run --cov=start --cov-report=term-missing --cov-fail-under=75",
+    "test:server": "COVERAGE_FILE=/tmp/utobond-open.coverage apps/server/.venv/bin/python -m pytest apps/server/tests -q -p no:cacheprovider --cov=config --cov=llm_client --cov=main --cov=presets --cov=storage --cov=storage_config --cov=run --cov=start --cov-report=term-missing --cov-fail-under=75",
     "test": "npm run test:core && npm run test:server",
     "check": "npm test && npm run build"
   },

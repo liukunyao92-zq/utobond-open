@@ -199,3 +199,57 @@ def test_config_drops_old_key_when_endpoint_changes(tmp_path, monkeypatch):
     changed = cfg.save_config({"provider": "custom", "baseURL": "https://two.example/v1",
                                "model": "m", "apiKey": ""})
     assert changed["apiKey"] == ""
+
+
+def test_legacy_config_migrates_to_list_and_can_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("UTOBOND_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("LLM_CONFIG_LOCKED", raising=False)
+    import config as cfg
+    (tmp_path / "llm.json").write_text(json.dumps({
+        "provider": "deepseek", "baseURL": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat", "apiKey": "legacy-secret",
+    }), "utf-8")
+
+    assert cfg.load_config()["apiKey"] == "legacy-secret"
+    initial = cfg.describe_configs()
+    assert initial["activeId"] == "legacy"
+    assert initial["configs"][0]["id"] == "legacy"
+    assert "apiKey" not in initial["configs"][0]
+
+    added = cfg.create_config({
+        "name": "备用模型", "provider": "custom", "baseURL": "https://backup.example/v1",
+        "model": "backup-model", "apiKey": "backup-secret",
+    })
+    assert cfg.load_config()["apiKey"] == "legacy-secret", "新增配置不应偷偷切换当前启用项"
+    cfg.activate_config(added["id"])
+    assert cfg.load_config()["apiKey"] == "backup-secret"
+
+    stored = json.loads((tmp_path / "llm.json").read_text("utf-8"))
+    assert stored["version"] == 2
+    assert len(stored["configs"]) == 2
+    assert stored["activeId"] == added["id"]
+
+    cfg.delete_config(added["id"])
+    assert cfg.load_config()["apiKey"] == "legacy-secret"
+
+
+def test_each_saved_config_keeps_its_own_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("UTOBOND_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("LLM_CONFIG_LOCKED", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    import config as cfg
+
+    first = cfg.create_config({
+        "name": "主力", "provider": "custom", "baseURL": "https://one.example/v1",
+        "model": "one", "apiKey": "key-one",
+    })
+    second = cfg.create_config({
+        "name": "备用", "provider": "custom", "baseURL": "https://two.example/v1",
+        "model": "two", "apiKey": "key-two",
+    })
+    cfg.update_config(second["id"], {"model": "two-new", "apiKey": ""})
+
+    assert cfg.get_config(first["id"])["apiKey"] == "key-one"
+    assert cfg.get_config(second["id"])["apiKey"] == "key-two"
+    assert cfg.get_config(second["id"])["model"] == "two-new"
