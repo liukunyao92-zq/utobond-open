@@ -20,6 +20,7 @@ import {
   tplChecklist, tplCampaign, MKT_GOALS,
   PLANS, PLAN_FEATURES, CAPABILITIES,
   newWizardDraft, normalizeWizardDrafts,
+  latestSnapshot,
 } from "@utobond/core";
 import { LOCAL_EDITION } from "./editions.js";
 import { LLMSettings } from "./LLMSettings.jsx";
@@ -532,6 +533,27 @@ function projectsFromSnapshot(snapshot) {
     }));
   }
   return projects.filter(Boolean);
+}
+
+const SNAPSHOT_CACHE_KEY = "utobond:snapshot:v3";
+
+function readSnapshotCache(cacheKey) {
+  if (!cacheKey || typeof window === "undefined") return null;
+  try {
+    const value = JSON.parse(window.localStorage.getItem(cacheKey) || "null");
+    return value && typeof value === "object" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSnapshotCache(cacheKey, snapshot) {
+  if (!cacheKey || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(cacheKey, JSON.stringify(snapshot));
+  } catch {
+    // 隐私模式或存储空间不足时仍继续使用服务端持久化。
+  }
 }
 
 /* ---------------- 通用组件 ---------------- */
@@ -2857,16 +2879,31 @@ export default function UtobangApp({
   extraPages = {},
   persistence = null,
 } = {}) {
+  // 登录版由账号隔离的服务端持久化负责，避免共享浏览器跨账号残留业务数据。
+  const snapshotCacheKey = edition.auth ? null : SNAPSHOT_CACHE_KEY;
+  const cachedSnapshotRef = useRef(undefined);
+  if (cachedSnapshotRef.current === undefined) cachedSnapshotRef.current = readSnapshotCache(snapshotCacheKey);
+  const initialProjectsRef = useRef(null);
+  if (initialProjectsRef.current === null) {
+    initialProjectsRef.current = projectsFromSnapshot(cachedSnapshotRef.current);
+  }
+  const initialProjects = initialProjectsRef.current;
+  const cachedActiveId = initialProjects.some((item) => item.id === cachedSnapshotRef.current?.activeProjectId)
+    ? cachedSnapshotRef.current.activeProjectId : initialProjects[0]?.id || null;
   const [view, setView] = useState("front");
   const [tab, setTab] = useState("overview");
   const [adminTab, setAdminTab] = useState("dash");
-  const [draftMode, setDraftMode] = useState("offline");
+  const [draftMode, setDraftMode] = useState(() => {
+    const cachedMode = cachedSnapshotRef.current?.draftMode;
+    const active = initialProjects.find((item) => item.id === cachedActiveId);
+    return active?.mode || (cachedMode === "online" ? "online" : "offline");
+  });
   const [draftBudgets, setDraftBudgets] = useState({
     offline: { ...DEFAULT_OFFLINE }, online: { ...DEFAULT_ONLINE },
   });
-  const [wizardDrafts, setWizardDrafts] = useState(() => normalizeWizardDrafts());
-  const [projects, setProjects] = useState([]);
-  const [activeProjectId, setActiveProjectId] = useState(null);
+  const [wizardDrafts, setWizardDrafts] = useState(() => normalizeWizardDrafts(cachedSnapshotRef.current?.wizardDrafts));
+  const [projects, setProjects] = useState(initialProjects);
+  const [activeProjectId, setActiveProjectId] = useState(cachedActiveId);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const projectPickerRef = useRef(null);
   const [localPlan, setLocalPlan] = useState("free");
@@ -2896,8 +2933,11 @@ export default function UtobangApp({
     if (!persistence) return;
     let alive = true;
     persistence.load()
-      .then((snap) => {
-        if (!alive || !snap) return;
+      .then((remoteSnapshot) => {
+        if (!alive) return;
+        const snap = latestSnapshot(cachedSnapshotRef.current, remoteSnapshot);
+        if (!snap) return;
+        cachedSnapshotRef.current = snap;
         const restored = projectsFromSnapshot(snap);
         setProjects(restored);
         const wanted = restored.some((item) => item.id === snap.activeProjectId)
@@ -2915,20 +2955,38 @@ export default function UtobangApp({
     return () => { alive = false; };
   }, [persistence]);
 
-  // 防抖写回:改一个数字就发一次请求太浪费
+  const latestSnapshotRef = useRef(cachedSnapshotRef.current);
+
+  // 浏览器缓存即时写入，服务端快照继续防抖写回。即使快速刷新或接口暂时失败，表单也不会丢。
   useEffect(() => {
     if (!persistence || !hydrated) return;
+    const snapshot = {
+      version: 3,
+      projects,
+      activeProjectId,
+      draftMode,
+      wizardDrafts,
+      savedAt: new Date().toISOString(),
+    };
+    latestSnapshotRef.current = snapshot;
+    cachedSnapshotRef.current = snapshot;
+    writeSnapshotCache(snapshotCacheKey, snapshot);
     const t = setTimeout(() => {
-      persistence.save({
-        version: 3,
-        projects,
-        activeProjectId,
-        draftMode,
-        wizardDrafts,
-      }).catch(() => {});
+      persistence.save(snapshot).catch(() => {});
     }, 800);
     return () => clearTimeout(t);
-  }, [persistence, hydrated, projects, activeProjectId, draftMode, wizardDrafts]);
+  }, [persistence, hydrated, projects, activeProjectId, draftMode, wizardDrafts, snapshotCacheKey]);
+
+  // 离开或刷新页面时尽力把浏览器里的最新草稿同步给服务端。
+  useEffect(() => {
+    if (!persistence || !hydrated || typeof window === "undefined") return undefined;
+    const flush = () => {
+      const snapshot = latestSnapshotRef.current;
+      if (snapshot) persistence.save(snapshot, { keepalive: true }).catch(() => {});
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [persistence, hydrated]);
 
   const activeProject = projects.find((item) => item.id === activeProjectId) || null;
   const mode = activeProject?.mode || draftMode;
@@ -3064,7 +3122,16 @@ export default function UtobangApp({
   const showModeSeg = !store && (PREP_TABS.has(tab) || !STANDALONE.has(tab));
 
   let page;
-  if (isAdmin) {
+  if (!hydrated) {
+    page = (
+      <div className="sp-page" style={{ display: "grid", minHeight: 420, placeItems: "center" }}>
+        <div style={{ textAlign: "center", color: C.muted }}>
+          <Loader2 size={28} className="sp-spin" color="var(--brand)" />
+          <div style={{ marginTop: 10 }}>正在恢复已保存的开店信息…</div>
+        </div>
+      </div>
+    );
+  } else if (isAdmin) {
     page = adminTab === "dash" ? <AdminDash /> : adminTab === "users" ? <AdminUsers /> : <AdminAI />;
   } else if (!store && !STANDALONE.has(tab)) {
     page = <Wizard mode={mode} setMode={setDraftMode}

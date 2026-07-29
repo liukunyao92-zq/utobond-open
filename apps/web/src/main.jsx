@@ -8,8 +8,8 @@ import { UtobangApp, LOCAL_EDITION, apiFetch } from "@utobond/ui";
  */
 const persistence = {
   load: () => apiFetch("/data/snapshot").then((data) => data.snapshot),
-  save: (snapshot) => apiFetch("/data/snapshot", {
-    method: "PUT", body: JSON.stringify({ snapshot }),
+  save: (snapshot, options = {}) => apiFetch("/data/snapshot", {
+    method: "PUT", body: JSON.stringify({ snapshot }), keepalive: !!options.keepalive,
   }),
 };
 

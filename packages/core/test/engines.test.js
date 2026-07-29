@@ -6,6 +6,7 @@ import {
   yuan, wan, pct, clamp, seeded,
   DEFAULT_OFFLINE, DEFAULT_ONLINE, planAllows,
   newWizardDraft, normalizeWizardDrafts,
+  latestSnapshot,
 } from "../src/index.js";
 
 test("线下:启动资金 = 一次性投入 + 备用金", () => {
@@ -149,6 +150,18 @@ test("开店草稿可恢复表单、步骤与生成方案", () => {
   assert.equal(drafts.online.info.name, "线上草稿");
   assert.equal(drafts.online.info.price, newWizardDraft("online").info.price);
   assert.equal(drafts.online.step, 1, "没有生成方案时不能恢复到空白结果页");
+});
+
+test("浏览器草稿缓存不会被较旧的服务端快照覆盖", () => {
+  const cached = { savedAt: "2026-07-29T10:01:00.000Z", wizardDrafts: { offline: {} } };
+  const remote = { savedAt: "2026-07-29T10:00:00.000Z", wizardDrafts: { offline: {} } };
+
+  assert.equal(latestSnapshot(cached, remote), cached);
+  assert.equal(latestSnapshot(cached, { projects: [] }), cached, "新版即时缓存优先于无时间戳旧快照");
+  assert.equal(latestSnapshot(null, remote), remote);
+  assert.equal(latestSnapshot(cached, null), cached);
+  assert.equal(latestSnapshot(cached, { ...remote, savedAt: "2026-07-29T10:02:00.000Z" }).savedAt,
+    "2026-07-29T10:02:00.000Z");
 });
 
 test("营销兜底模板覆盖线上与线下", () => {
