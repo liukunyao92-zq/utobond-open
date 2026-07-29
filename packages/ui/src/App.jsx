@@ -17,8 +17,9 @@ import {
   yuan, wan, pct, clamp, seeded, parseJSON,
   calcOffline, calcOnline, detectRisks,
   DEFAULT_OFFLINE, DEFAULT_ONLINE,
-  tplChecklist, tplCampaign, WIZ_DEFAULTS, MKT_GOALS,
+  tplChecklist, tplCampaign, MKT_GOALS,
   PLANS, PLAN_FEATURES, CAPABILITIES,
+  newWizardDraft, normalizeWizardDrafts,
 } from "@utobond/core";
 import { LOCAL_EDITION } from "./editions.js";
 import { LLMSettings } from "./LLMSettings.jsx";
@@ -2353,15 +2354,19 @@ function AdminAI() {
 }
 
 /* ================= 前台:开店向导 ================= */
-function Wizard({ mode, setMode, onDone }) {
+function Wizard({ mode, setMode, draft, setDraft, onDone }) {
   const { off, on, setOff, setOn, useAI, aiLeft } = useApp();
   const online = mode === "online";
-  const [step, setStep] = useState(0);
-  const [info, setInfo] = useState(WIZ_DEFAULTS[mode]);
+  const step = draft.step;
+  const info = draft.info;
+  const plan = draft.plan;
   const [busy, setBusy] = useState(false);
-  const [plan, setPlan] = useState(null);
-  useEffect(() => { setInfo(WIZ_DEFAULTS[mode]); setPlan(null); }, [mode]);
-  const set = (k) => (v) => setInfo((s) => ({ ...s, [k]: v }));
+  const setStep = (next) => setDraft((current) => ({ ...current, step: next }));
+  const setPlan = (next) => setDraft((current) => ({ ...current, plan: next }));
+  const set = (k) => (v) => setDraft((current) => ({
+    ...current,
+    info: { ...current.info, [k]: v },
+  }));
 
   async function generate() {
     setBusy(true); setPlan(null);
@@ -2438,7 +2443,8 @@ function Wizard({ mode, setMode, onDone }) {
       )}
 
       {step === 1 && (
-        <Card title={online ? "你的线上店" : "你的线下店"} eyebrow="STORE INFO">
+        <Card title={online ? "你的线上店" : "你的线下店"} eyebrow="STORE INFO"
+          right={<Tag tone="profit">草稿自动保存</Tag>}>
           <div className="sp-rowsplit">
             <Field label="店铺名称"><input className="sp-input" value={info.name} onChange={(e) => set("name")(e.target.value)} /></Field>
             <Field label="经营品类"><input className="sp-input" value={info.category} onChange={(e) => set("category")(e.target.value)} placeholder="如:精品咖啡 / 女装 / 文具" /></Field>
@@ -2858,6 +2864,7 @@ export default function UtobangApp({
   const [draftBudgets, setDraftBudgets] = useState({
     offline: { ...DEFAULT_OFFLINE }, online: { ...DEFAULT_ONLINE },
   });
+  const [wizardDrafts, setWizardDrafts] = useState(() => normalizeWizardDrafts());
   const [projects, setProjects] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -2882,7 +2889,7 @@ export default function UtobangApp({
   const setPlan = (p) => (onPlanChange ? onPlanChange(p) : setLocalPlan(p));
 
   /**
-   * 数据持久化（可选）。v2 起每个开店项目拥有独立的店铺、预算、候选与 AI 对话。
+   * 数据持久化（可选）。v2 起每个开店项目拥有独立数据；v3 增加未完成向导草稿。
    */
   const [hydrated, setHydrated] = useState(!persistence);
   useEffect(() => {
@@ -2896,7 +2903,11 @@ export default function UtobangApp({
         const wanted = restored.some((item) => item.id === snap.activeProjectId)
           ? snap.activeProjectId : restored[0]?.id || null;
         setActiveProjectId(wanted);
+        setWizardDrafts(normalizeWizardDrafts(snap.wizardDrafts));
         const active = restored.find((item) => item.id === wanted);
+        if (!active && (snap.draftMode === "offline" || snap.draftMode === "online")) {
+          setDraftMode(snap.draftMode);
+        }
         if (active) setDraftMode(active.mode);
       })
       .catch(() => { /* 读不到就当新用户,不挡在门外 */ })
@@ -2908,10 +2919,16 @@ export default function UtobangApp({
   useEffect(() => {
     if (!persistence || !hydrated) return;
     const t = setTimeout(() => {
-      persistence.save({ version: 2, projects, activeProjectId }).catch(() => {});
+      persistence.save({
+        version: 3,
+        projects,
+        activeProjectId,
+        draftMode,
+        wizardDrafts,
+      }).catch(() => {});
     }, 800);
     return () => clearTimeout(t);
-  }, [persistence, hydrated, projects, activeProjectId]);
+  }, [persistence, hydrated, projects, activeProjectId, draftMode, wizardDrafts]);
 
   const activeProject = projects.find((item) => item.id === activeProjectId) || null;
   const mode = activeProject?.mode || draftMode;
@@ -3051,6 +3068,11 @@ export default function UtobangApp({
     page = adminTab === "dash" ? <AdminDash /> : adminTab === "users" ? <AdminUsers /> : <AdminAI />;
   } else if (!store && !STANDALONE.has(tab)) {
     page = <Wizard mode={mode} setMode={setDraftMode}
+      draft={wizardDrafts[mode]}
+      setDraft={(updater) => setWizardDrafts((all) => ({
+        ...all,
+        [mode]: typeof updater === "function" ? updater(all[mode]) : updater,
+      }))}
       onDone={(info, planObj) => {
         const id = newProjectId();
         const createdAt = new Date().toISOString();
@@ -3066,6 +3088,7 @@ export default function UtobangApp({
         };
         setProjects((all) => [...all, nextProject]);
         setActiveProjectId(id);
+        setWizardDrafts((all) => ({ ...all, [mode]: newWizardDraft(mode) }));
         setTab("checklist");
       }} />;
   } else {

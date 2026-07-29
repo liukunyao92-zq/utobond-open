@@ -5,6 +5,7 @@ import {
   calcByMode, tplCampaign, capabilityMinPlan, CAPABILITY_LIST,
   yuan, wan, pct, clamp, seeded,
   DEFAULT_OFFLINE, DEFAULT_ONLINE, planAllows,
+  newWizardDraft, normalizeWizardDrafts,
 } from "../src/index.js";
 
 test("线下:启动资金 = 一次性投入 + 备用金", () => {
@@ -124,6 +125,30 @@ test("公共格式化、分发与能力契约", () => {
   assert.equal(capabilityMinPlan("budgetAudit"), "pro");
   assert.equal(capabilityMinPlan("unknown"), "free");
   assert.equal(CAPABILITY_LIST.length, 7);
+});
+
+test("开店草稿可恢复表单、步骤与生成方案", () => {
+  const plan = { source: "tpl", groups: [{ name: "筹备", items: [] }], tips: [] };
+  const drafts = normalizeWizardDrafts({
+    offline: {
+      info: { name: "自动保存咖啡店", city: "宁波", price: 38 },
+      step: 2,
+      plan,
+    },
+    online: {
+      info: { name: "线上草稿", price: "not-a-number" },
+      step: 2,
+    },
+  });
+
+  assert.equal(drafts.offline.info.name, "自动保存咖啡店");
+  assert.equal(drafts.offline.info.city, "宁波");
+  assert.equal(drafts.offline.info.price, 38);
+  assert.equal(drafts.offline.step, 2);
+  assert.deepEqual(drafts.offline.plan, plan);
+  assert.equal(drafts.online.info.name, "线上草稿");
+  assert.equal(drafts.online.info.price, newWizardDraft("online").info.price);
+  assert.equal(drafts.online.step, 1, "没有生成方案时不能恢复到空白结果页");
 });
 
 test("营销兜底模板覆盖线上与线下", () => {
